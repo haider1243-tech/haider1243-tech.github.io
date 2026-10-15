@@ -25,7 +25,7 @@
   const icon = (k) => `<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">${ICONS[k] || ICONS.plc}</svg>`;
 
   // Everything that can reference a skill, for "used in" links.
-  const LOG = [...P.log].sort(byNewest);
+  const LOG = P.log.filter((e) => e.site !== false).sort(byNewest);
   const usedIn = (skill) => [
     ...P.software.filter((s) => (s.skills || []).includes(skill)).map((s) => ({ label: s.name, go: () => goTo("#sw-" + s.id) })),
     ...LOG.filter((e) => (e.skills || []).includes(skill)).map((e) => ({ label: e.title, go: () => openLog(e.id) }))
@@ -97,10 +97,11 @@
   /* ---------- ABOUT: specs + stats ---------- */
   $("#specList").innerHTML = [
     ["LOCATION", P.location],
-    ["CREDENTIAL", "EET Diploma, SAIT — 2026"],
+    ["CREDENTIAL", "EET Diploma, SAIT — April 2026"],
     ["DESIGNATION", P.designation],
     ["WORK STATUS", P.workStatus],
     ["FOCUS AREAS", "Protection · Controls · Automation"],
+    ["SEEKING", "Technologist · Controls · Testing · Field service"],
     ["LANGUAGES", P.languages]
   ].map(([k, v]) => `<div class="spec-row"><span class="k">${esc(k)}</span><span class="v">${esc(v)}</span></div>`).join("");
 
@@ -399,7 +400,7 @@
     const readout = $("#sldReadout"), live = $("#sldLive"), brk = $("#brkState");
     const faultBtn = $("#faultBtn"), resetBtn = $("#resetBtn");
     const len = path.getTotalLength();
-    const TRIP_MS = 12, TRAVEL = 900; // shown ms, animation ms (~75x slower)
+    const TRIP_MS = 9, TRAVEL = 900; // shown ms, animation ms (~100x slower)
     let state = "normal", timers = [];
 
     const say = (txt, cls = "") => { readout.textContent = txt; readout.className = "sld-readout " + cls; };
@@ -443,7 +444,7 @@
         brk.textContent = "OPEN";
         live.textContent = "● TRIPPED";
         state = "tripped";
-        say(`TRIP ✓ · breaker 52 open · ~${TRIP_MS} ms relay-to-relay (verified 10–15 ms)`, "ok");
+        say("TRIP ✓ · breaker 52 open · sub-10 ms relay-to-relay (lab-measured, ±5 ms)", "ok");
         resetBtn.disabled = false;
       };
       if (reduceMotion) { finish(); return; }

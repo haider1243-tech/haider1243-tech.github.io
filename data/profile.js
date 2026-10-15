@@ -11,6 +11,8 @@
    - `skills` on log/software entries must match a skill `name` exactly —
      that is what links skills <-> experience on the site.
    - `resume: false` hides an entry from resume.html but keeps it on the site.
+   - `site: false` keeps an entry on resume.html only (the site is
+     engineering-focused; everything else lives on LinkedIn).
    ========================================================================== */
 
 window.PROFILE = {
@@ -28,7 +30,8 @@ window.PROFILE = {
   startYear: 2021, // first year in engineering — drives the "years" stat
 
   summary:
-    "ASET Technologist-in-Training with hands-on capstone experience in relay configuration, PLC/HMI programming, and electrical schematics. Builds browser-based engineering tools for analyzer systems. Field-safety trained — LOTO, FLHA, CSTS 2020, WHMIS 2015. Building toward protection systems, SCADA, and ICS cybersecurity.",
+    "**SAIT Electrical Engineering Technology Graduate (2026)** and ASET Technologist-in-Training with practical lab and capstone project experience. Proficient in **Rockwell PLC/HMI programming**, industrial networking, and **SEL protective relay** configuration. Skilled in **AutoCAD drafting** and applying **CEC criteria** for wire and conduit sizing. Combines technical troubleshooting with standard field safety practices (**LOTO, FLHA**), and builds browser-based engineering software for process analyzer systems. Seeking an entry-level electrical technologist, automation/controls, testing, field service, or design support role.",
+  seeking: "Entry-level electrical technologist, automation/controls, testing, field service, or design support roles",
 
   /* ---------------- SKILLS ----------------
      color: "blueprint" | "amber" | "cyan"
@@ -43,7 +46,8 @@ window.PROFILE = {
         { name: "FactoryTalk View", icon: "screen", desc: "Custom HMI screen configuration for operator control" },
         { name: "RSLinx Enterprise", icon: "clock", desc: "Industrial network communication between PLCs and devices" },
         { name: "Unity Pro XL", icon: "plc", desc: "Modicon PLC programming for automation logic" },
-        { name: "RSNetWorx", icon: "network", desc: "Industrial network configuration and diagnostics" }
+        { name: "RSNetWorx", icon: "network", desc: "Industrial network configuration and diagnostics" },
+        { name: "PowerSuite", icon: "clock", desc: "Programmed ATV 71 VFDs and ATS48 soft starters" }
       ]
     },
     {
@@ -55,13 +59,23 @@ window.PROFILE = {
         { name: "Wireshark", icon: "target", desc: "Verified peer-to-peer relay trip operation on the network" },
         { name: "ASE2000 (DNP3)", icon: "plc", desc: "Simulated SCADA traffic and verified DNP3 protocol comms" },
         { name: "IEC 61850", icon: "wave", desc: "Core protocol used in capstone GOOSE messaging design" },
-        { name: "CEC Codebook", icon: "chart", desc: "Applied Sections 4 & 12 for ampacity, derating, conduit fill" }
+        { name: "CEC Codebook", icon: "chart", desc: "Applied Sections 4 & 12 (Tables 1-9 & 13-50) for ampacity, temperature derating, and conduit fill" }
+      ]
+    },
+    {
+      group: "Equipment & Lab", color: "amber",
+      items: [
+        { name: "Allen-Bradley PLCs", icon: "plc", desc: "ControlLogix programming — ladder logic interlocks, I/O mapping, fault handling" },
+        { name: "PanelView 5310 HMI", icon: "screen", desc: "Ran custom FactoryTalk View HMI screens on physical PanelView hardware" },
+        { name: "SEL-751A / 587 / 501 relays", icon: "bolt", desc: "Configured and tested industrial protection schemes on real relays" },
+        { name: "ATV 71 VFD / ATS48 soft starter", icon: "wave", desc: "Programmed drives and soft starters via PowerSuite" },
+        { name: "LabVolt / LVDC-EMS", icon: "chart", desc: "Wired, commissioned, and tested transformers, DC/induction, and synchronous machines" }
       ]
     },
     {
       group: "Design & Drafting", color: "cyan",
       items: [
-        { name: "AutoCAD Electrical", icon: "draw", desc: "Drafted single-line diagrams, schematics, and panel layouts" },
+        { name: "AutoCAD Electrical", icon: "draw", desc: "Drafted single-line diagrams (SLDs), schematics, panel board layouts, and capstone wiring diagrams" },
         { name: "Autodesk Revit", icon: "draw", desc: "Actively learning — building on AutoCAD fundamentals for BIM-based design", learning: true },
         { name: "SolidWorks", icon: "cube", desc: "3D modeling coursework — where the automotive design interest started" },
         { name: "ProjectLibre", icon: "network", desc: "Project scheduling and deadline tracking for capstone work" }
@@ -143,61 +157,54 @@ window.PROFILE = {
       resume: true
     },
     {
-      id: "bestbuy", type: "work",
-      start: "2026-07", end: "present",
-      title: "Specialist, Product Process",
-      org: "Best Buy Canada", location: "Calgary, AB",
-      summary: "Supporting merchandising, stocking, and product process operations in a fast-paced retail environment, while maintaining organized, customer-ready sales floor areas.",
-      details: [],
-      skills: [],
-      resume: true
-    },
-    {
       id: "capstone", type: "project",
       start: "2026-04",
-      title: "IEC 61850 Digital Substation Control & Protection",
+      title: "Capstone Project Lead — IEC 61850 Digital Substation Control & Protection",
       org: "SAIT · Capstone Design",
-      summary: "A substation protection scheme modeled on ENMAX Substation No. 1 — relay config, wiring, and verified trip testing.",
+      summary: "Led an IEC 61850 substation protection scheme modeled around utility protection concepts observed during an ENMAX field visit — relay config, wiring, and verified trip testing.",
       details: [
-        "Configured **IEC 61850-enabled SEL-751A protection relays** for GOOSE publisher/subscriber messaging using SEL AcSELerator Architect and QuickSet — replacing hardwired copper tripping with Ethernet-based relay communication.",
-        "Built protection wiring circuits for publisher and subscriber communication with step-down transformers at rated voltage.",
-        "Verified peer-to-peer relay trip operation using **Wireshark** and QuickSet — **10–15 ms** trip time, reliable and repeatable.",
+        "Led design, **relay configuration**, **AutoCAD wiring diagrams**, testing, and technical reporting for an **IEC 61850-based substation protection scheme** modeled around utility protection concepts observed during an ENMAX field visit.",
+        "Configured **SEL-751A protection relays** for **GOOSE publisher/subscriber messaging** using **SEL AcSELerator Architect** and **QuickSet**, replacing hardwired trip signaling with Ethernet-based relay communication.",
+        "Verified peer-to-peer relay trip operation using **Wireshark** and **QuickSet**, observing **sub-10 ms lab response times** with documented ±5 ms timestamp uncertainty.",
         "Delivered as a proof-of-concept using available lab equipment — with an honest understanding that fiber-based hardwired schemes remain preferred in many production environments today."
       ],
-      skills: ["SEL AcSELerator QuickSet", "SEL AcSELerator Architect", "Wireshark", "IEC 61850", "ProjectLibre"],
+      skills: ["SEL AcSELerator QuickSet", "SEL AcSELerator Architect", "Wireshark", "IEC 61850", "SEL-751A / 587 / 501 relays", "AutoCAD Electrical", "ProjectLibre"],
       resume: true
     },
     {
       id: "sait", type: "education",
       start: "2024-09", end: "2026-04",
       title: "Electrical Engineering Technology Diploma",
-      org: "SAIT", location: "Calgary, AB",
-      summary: "Switched deliberately into EET. Lab and project work across automation, protection, and electrical design.",
+      org: "Southern Alberta Institute of Technology (SAIT)", location: "Calgary, AB",
+      summary: "Switched deliberately into EET. Lab and project work across automation, protection, machines, and electrical design.",
+      coursework: "**PLC ControlLogix**, Industrial Networks, **Protection and Control**, Power System Analysis, Electrical Machines, Instrumentation, **AutoCAD Electrical**, Capstone Design",
+      experienceTitle: "SAIT — Electrical Engineering Technology Lab & Project Work",
       details: [
-        "Programmed Allen-Bradley and Modicon PLCs via Studio 5000, RSLogix 5000, and Unity Pro XL.",
-        "Configured and tested protection schemes with SEL-751A/587/501 relays and ETAP.",
-        "Drafted AutoCAD single-line diagrams and applied CEC sizing for ampacity, derating, and conduit fill.",
-        "Wired and tested three-phase transformers, DC/induction motors, and VFDs/soft starters.",
-        "Completed daily FLHA forms and executed LOTO procedures."
+        "**Industrial Automation:** Programmed **Allen-Bradley** and **Modicon PLCs** using **Studio 5000, RSLogix 5000,** and **Unity Pro XL**. Mapped I/O, developed ladder logic interlocks, and configured custom HMI screens via **FactoryTalk View Studio** to run physical PanelView 5310 hardware.",
+        "**Power Systems & Protection:** Configured and tested industrial protection schemes using **SEL-751A/587/501 relays** and **ETAP** software. Used **ASE2000** to simulate SCADA traffic and verify **DNP3 protocol** communication.",
+        "**Electrical Drafting & CEC Sizing:** Drafted **AutoCAD single-line diagrams (SLDs)**, schematics, and panel board layouts. Applied **CEC Sections 4 and 12 (Tables 1-9 & 13-50)** to calculate precise wire ampacities, temperature derating, and conduit fill.",
+        "**Electrical Machines & Drives:** Wired, commissioned, and tested three-phase transformers, DC/induction motors, and synchronous machines using **LabVolt/LVDC-EMS**. Programmed **ATV 71 VFDs** and **ATS48 Soft Starters** via PowerSuite.",
+        "**Field Safety Compliance:** Completed **daily FLHA forms** and executed strict **LOTO procedures** before wiring control panels, switches, sensors, and terminal blocks."
       ],
-      skills: ["Studio 5000", "RSLogix 5000", "Unity Pro XL", "FactoryTalk View", "RSLinx Enterprise", "RSNetWorx", "ETAP", "ASE2000 (DNP3)", "AutoCAD Electrical", "CEC Codebook"],
+      skills: ["Studio 5000", "RSLogix 5000", "Unity Pro XL", "FactoryTalk View", "RSLinx Enterprise", "RSNetWorx", "PowerSuite", "Allen-Bradley PLCs", "PanelView 5310 HMI", "SEL-751A / 587 / 501 relays", "ATV 71 VFD / ATS48 soft starter", "LabVolt / LVDC-EMS", "ETAP", "ASE2000 (DNP3)", "AutoCAD Electrical", "CEC Codebook"],
       resume: true
     },
     {
       id: "allisons", type: "work",
-      start: "2024", end: "present",
+      start: "2024-04", end: "present",
       title: "Construction / Renovation Assistant",
       org: "Allisons Construction Ltd.", location: "Calgary, AB · Casual / On-Call",
       summary: "Residential renovation work including drywall, cabinets, flooring/tile, painting, lumber cutting, drilling/fastening, and material handling, with safe hand/power tool use across job sites.",
       details: [],
       skills: [],
-      resume: true
+      resume: true,
+      site: false // resume only — non-engineering work lives on LinkedIn
     },
     {
       id: "uofc", type: "education",
       start: "2021", end: "2024",
       title: "Mechanical Engineering Coursework",
-      org: "University of Calgary", location: "Calgary, AB",
+      org: "University of Calgary — Schulich School of Engineering", location: "Calgary, AB",
       summary: "Started in mechanical engineering. Found SolidWorks — genuinely enjoyed the 3D modeling side of the craft.",
       details: [],
       skills: ["SolidWorks"],
@@ -241,7 +248,7 @@ window.PROFILE = {
       date: "2026-04", area: "engineering", project: "Capstone",
       title: "Lab equipment vs. production practice",
       problem: "The capstone had to prove Ethernet-based GOOSE tripping using the lab equipment available, while fiber-based hardwired schemes remain preferred in many production substations.",
-      fix: "Scoped it as a proof-of-concept and verified the trip on the wire with Wireshark — 10–15 ms, repeatable.",
+      fix: "Scoped it as a proof-of-concept and verified the trip on the wire with Wireshark — sub-10 ms lab response, with the ±5 ms timestamp uncertainty documented rather than hidden.",
       lesson: "Be clear about what a result proves — and what it doesn't."
     },
     {
@@ -263,7 +270,7 @@ window.PROFILE = {
       milestones: [
         { text: "EET Diploma — SAIT", state: "done" },
         { text: "ASET Technologist-in-Training registration", state: "done" },
-        { text: "Capstone: verified GOOSE trip (10–15 ms)", state: "done" }
+        { text: "Capstone: verified GOOSE trip (sub-10 ms)", state: "done" }
       ]
     },
     {
@@ -326,7 +333,7 @@ window.PROFILE = {
   certs: [
     { name: "Technologist-in-Training (T.T.)", issuer: "ASET · Active Registration", kind: "cert", featured: true },
     { name: "Electrical Engineering Technology Diploma", issuer: "SAIT · Calgary, AB · 2026", kind: "education" },
-    { name: "Mechanical Engineering Coursework", issuer: "University of Calgary · 2021–2024", kind: "education" },
+    { name: "Mechanical Engineering Coursework", issuer: "University of Calgary (Schulich) · 2021–2024", kind: "education" },
     { name: "CSTS 2020", issuer: "Safety Certification", kind: "cert" },
     { name: "WHMIS 2015", issuer: "Safety Certification", kind: "cert" },
     { name: "TDG Awareness", issuer: "Safety Certification", kind: "cert" }

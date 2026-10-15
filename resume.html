@@ -40,6 +40,7 @@ ul{margin:4px 0 0 16px;}
 li{margin-bottom:2px;}
 li::marker{color:var(--accent);}
 .certs{display:flex; flex-wrap:wrap; gap:4px 18px;}
+.refs{margin-top:14px;}
 .foot{margin-top:18px; font-size:11px; color:var(--muted); font-family:'IBM Plex Mono', monospace;}
 @page{size:letter; margin:0.45in 0.5in;}
 @media print{
@@ -72,23 +73,36 @@ li::marker{color:var(--accent);}
   const log = P.log.filter((e) => e.resume !== false).sort(byNewest);
   const of = (type) => log.filter((e) => e.type === type);
 
-  const item = (e) => `
-    <div class="item">
-      <div class="item-head"><h3>${esc(e.title)}</h3><span class="when">${esc(fmtRange(e))}</span></div>
-      <div class="org">${esc(e.org)}${e.location ? " · " + esc(e.location) : ""}</div>
-      ${e.details && e.details.length
-        ? `<ul>${e.details.map((d) => `<li>${rich(d)}</li>`).join("")}</ul>`
-        : e.summary ? `<p>${rich(e.summary)}</p>` : ""}
-    </div>`;
-
+  const head = (title, when, org) => `
+      <div class="item-head"><h3>${title}</h3><span class="when">${esc(when)}</span></div>
+      ${org ? `<div class="org">${org}</div>` : ""}`;
+  const bullets = (list) => (list && list.length ? `<ul>${list.map((d) => `<li>${rich(d)}</li>`).join("")}</ul>` : "");
+  const where = (e) => esc(e.org) + (e.location ? " · " + esc(e.location) : "");
   const section = (title, html) => (html ? `<h2>${title}</h2>${html}` : "");
+
+  // Education: diploma/coursework lines (lab work is listed under Technical Experience)
+  const education = of("education").map((e) => `
+    <div class="item">
+      ${head(esc(e.title), fmtRange(e), where(e))}
+      ${e.coursework ? `<p><b>Relevant coursework:</b> ${rich(e.coursework)}</p>` : ""}
+    </div>`).join("");
+
+  // Technical experience: education entries that carry lab/project work
+  const technical = of("education").filter((e) => e.experienceTitle && e.details?.length).map((e) => `
+    <div class="item">${head(esc(e.experienceTitle), fmtRange(e), esc(e.location || ""))}${bullets(e.details)}</div>`).join("");
+
+  const projects = of("project").filter((e) => e.id !== "analyzer-toolkit-log").map((e) => `
+    <div class="item">${head(esc(e.title), fmtRange(e), where(e))}${bullets(e.details)}</div>`).join("");
 
   const software = P.software.map((s) => `
     <div class="item">
-      <div class="item-head"><h3>${esc(s.name)} <span class="org">(${esc(s.version)}${s.launched ? "" : " · in development"})</span></h3><span class="when">${esc(fmtRange({ start: s.start, end: s.status === "active" ? "present" : undefined }))}</span></div>
-      <div class="org">${rich(s.tagline)}</div>
-      <ul>${s.features.slice(0, 4).map((f) => `<li>${rich(f)}</li>`).join("")}</ul>
+      ${head(`${esc(s.name)} <span class="org">(${esc(s.version)}${s.launched ? "" : " · in development"})</span>`,
+             fmtRange({ start: s.start, end: s.status === "active" ? "present" : undefined }), rich(s.tagline))}
+      ${bullets(s.features.slice(0, 4))}
     </div>`).join("");
+
+  const work = of("work").map((e) => `
+    <div class="item">${head(esc(e.title), fmtRange(e), where(e))}${e.details?.length ? bullets(e.details) : e.summary ? `<ul><li>${rich(e.summary)}</li></ul>` : ""}</div>`).join("");
 
   document.getElementById("resume").innerHTML = `
     <header>
@@ -99,21 +113,21 @@ li::marker{color:var(--accent);}
         <a href="tel:${esc(P.phoneHref)}">${esc(P.phone)}</a>
         <a href="mailto:${esc(P.email)}">${esc(P.email)}</a>
         <a href="${esc(P.linkedin)}">${esc(P.linkedin.replace(/^https?:\/\//, ""))}</a>
-        <span>${esc(P.workStatus)}</span>
       </div>
     </header>
 
     ${section("Summary", `<p class="summary">${rich(P.summary)}</p>`)}
-
-    ${section("Technical Skills", `<dl class="skills">${P.skills.map((g) =>
+    ${section("Education", education)}
+    ${section("Core Technical Skills", `<dl class="skills">${P.skills.map((g) =>
       `<dt>${esc(g.group)}</dt><dd>${g.items.map((s) => esc(s.name) + (s.learning ? " (learning)" : "")).join(", ")}</dd>`).join("")}</dl>`)}
-
-    ${section("Projects", of("project").filter((e) => e.id !== "analyzer-toolkit-log").map(item).join("") + software)}
-    ${section("Experience", of("work").map(item).join(""))}
-    ${section("Education", of("education").map(item).join(""))}
+    ${section("Technical Experience", technical)}
+    ${section("Capstone Project", projects)}
+    ${section("Software Project", software)}
+    ${section("Additional Work Experience", work)}
     ${section("Certifications", `<div class="certs">${P.certs.filter((c) => c.kind === "cert").map((c) =>
       `<span><b>${esc(c.name)}</b> — ${esc(c.issuer)}</span>`).join("")}</div>`)}
     ${section("Languages", `<p>${esc(P.languages)}</p>`)}
+    <p class="refs"><b>References:</b> available on request.</p>
 
     <p class="foot">Last updated ${esc(window.Site.fmtDate(P.updated))} · Full portfolio and pathway log at the main site.</p>`;
 })();
