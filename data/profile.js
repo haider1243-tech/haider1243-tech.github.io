@@ -79,7 +79,10 @@ window.PROFILE = {
   ],
 
   /* ---------------- SOFTWARE PROJECTS ----------------
-     Your other repos/tools. private: true shows "Private repo · available on request". */
+     Products and tools you're building.
+     launched: false -> shown as "In development · not yet public", with no link
+                        and a "Request early access" button instead.
+     When it launches: set launched: true and add url: "https://..." */
   software: [
     {
       id: "analyzer-toolkit",
@@ -88,8 +91,9 @@ window.PROFILE = {
       version: "v3.4",
       status: "active",
       start: "2026-10",
-      private: true,
-      repo: "https://github.com/haider1243-tech/analyzer-toolkit",
+      launched: false,
+      availability: "In development · commercial release planned",
+      note: "Not publicly available yet — the toolkit and its product website are still being built for a paid release.",
       desc: "A single HTML file — no install, no server — that checks where a sample probe tip lands in the pipe bore from the valve / nipple / threadolet stack, and suggests fittings or probe lengths that fix it.",
       features: [
         "Probe insertion check against the centre third (or a custom window), with a live dimensioned section drawing",
@@ -104,7 +108,19 @@ window.PROFILE = {
         { text: "Probe insertion check", state: "done" },
         { text: "Analyzer config checker", state: "todo" },
         { text: "Wake frequency tool", state: "todo" },
-        { text: "Sample lag time tool", state: "todo" }
+        { text: "Sample lag time tool", state: "todo" },
+        { text: "Product website", state: "active" },
+        { text: "Public (paid) launch", state: "todo" }
+      ],
+      // Build log — played as a terminal on the site. Newest last.
+      releases: [
+        { v: "v1.0.0", date: "2026-10-04", note: "Probe insertion check, live section drawing, saved taps" },
+        { v: "v2.0.0", date: "2026-10-05", note: "Redline markups, revision history, title block, DXF/SVG/CSV export" },
+        { v: "v3.0.0", date: "2026-10-05", note: "Probe length mode, custom target zone" },
+        { v: "v3.1.0", date: "2026-10-05", note: "Job-agnostic defaults, load example" },
+        { v: "v3.2.0", date: "2026-10-15", note: "CAD package: DXF + SolidWorks macro + equations" },
+        { v: "v3.3.0", date: "2026-10-15", note: "11x17 vector PDF sheet, SolidWorks drawing → DWG" },
+        { v: "v3.4.0", date: "2026-10-15", note: "3D model, Monte Carlo stack-up, wake frequency, 102-check backtest" }
       ]
     }
   ],
@@ -116,7 +132,7 @@ window.PROFILE = {
       id: "analyzer-toolkit-log", type: "project",
       start: "2026-10", end: "present",
       title: "Analyzer Toolkit — v1.0 → v3.4",
-      org: "Personal software project",
+      org: "Software product · in development",
       summary: "Built and shipped a browser-based probe insertion checker for process analyzer systems — seven releases in under two weeks.",
       details: [
         "Released v1.0 (probe insertion check + live section drawing) on Oct 4, 2026 and iterated to **v3.4** by Oct 15.",
@@ -252,12 +268,14 @@ window.PROFILE = {
     },
     {
       phase: "00", when: "Now", title: "Ship Analyzer Toolkit", area: "Software", status: "active",
-      desc: "Grow the toolkit from one tool into a full set of analyzer system checks.",
+      desc: "Grow the toolkit from one tool into a full set of analyzer system checks — then launch it as a paid product with its own website.",
       milestones: [
         { text: "Probe insertion check (v3.4)", state: "done" },
         { text: "Analyzer config checker", state: "todo" },
         { text: "Wake frequency tool", state: "todo" },
-        { text: "Sample lag time tool", state: "todo" }
+        { text: "Sample lag time tool", state: "todo" },
+        { text: "Product website", state: "active" },
+        { text: "Public (paid) launch", state: "todo" }
       ]
     },
     {

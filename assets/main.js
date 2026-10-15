@@ -1,6 +1,6 @@
 (() => {
   const P = window.PROFILE;
-  const { esc, rich, fmtRange, duration, byNewest } = window.Site;
+  const { esc, rich, duration, byNewest } = window.Site;
   const $ = (s, r = document) => r.querySelector(s);
   const $$ = (s, r = document) => [...r.querySelectorAll(s)];
   const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -83,7 +83,7 @@
   addEventListener("scroll", onScroll, { passive: true });
   onScroll();
 
-  const links = new Map($$("a", navLinks).map((a) => [a.getAttribute("href").slice(1), a]));
+  const links = new Map($$('a[href^="#"]', navLinks).map((a) => [a.getAttribute("href").slice(1), a]));
   const spy = new IntersectionObserver((entries) => {
     entries.forEach((en) => {
       if (!en.isIntersecting) return;
@@ -181,25 +181,70 @@
 
   $("#softwareList").innerHTML = P.software.map((s) => {
     const [label, color] = STATUS[s.status] || STATUS.planned;
+    const subject = encodeURIComponent(`${s.name} — early access`);
+    const access = s.launched && s.url
+      ? `<a class="btn btn-primary btn-sm" href="${esc(s.url)}" target="_blank" rel="noopener">Open ${esc(s.name)} ↗</a>`
+      : `<a class="btn btn-primary btn-sm" href="mailto:${esc(P.email)}?subject=${subject}">Request early access</a>
+         <span class="sw-lock">🔒 No public link yet</span>`;
     return `
-    <article class="sw-card reveal" id="sw-${esc(s.id)}">
+    <article class="sw-card spot reveal" id="sw-${esc(s.id)}" itemscope itemtype="https://schema.org/SoftwareApplication">
+      ${s.launched ? "" : `<div class="sw-banner"><span class="sw-banner-dot"></span>${esc(s.availability || "In development")}</div>`}
       <div class="sw-main">
-        <div class="sw-head"><h3>${esc(s.name)}</h3><span class="pill blue">${esc(s.version)}</span><span class="pill ${color}">${label}</span></div>
-        <p class="sw-tagline">${rich(s.tagline)}</p>
+        <div class="sw-head"><h3 itemprop="name">${esc(s.name)}</h3><span class="pill blue" itemprop="softwareVersion">${esc(s.version)}</span><span class="pill ${color}">${label}</span></div>
+        <p class="sw-tagline" itemprop="description">${rich(s.tagline)}</p>
         <p class="sw-desc">${rich(s.desc)}</p>
-        <ul class="bullet-list">${s.features.map((f) => `<li>${rich(f)}</li>`).join("")}</ul>
+        <div class="sw-tabs" role="tablist" aria-label="${esc(s.name)} details">
+          <button type="button" role="tab" class="sw-tab" aria-selected="true" data-tab="features">Features</button>
+          ${s.releases?.length ? '<button type="button" role="tab" class="sw-tab" aria-selected="false" data-tab="log">Build log</button>' : ""}
+        </div>
+        <div class="sw-panel" data-panel="features" role="tabpanel">
+          <ul class="bullet-list">${s.features.map((f) => `<li>${rich(f)}</li>`).join("")}</ul>
+        </div>
+        ${s.releases?.length ? `
+        <div class="sw-panel" data-panel="log" role="tabpanel" hidden>
+          <div class="term" aria-label="Release history">
+            <div class="term-bar"><i></i><i></i><i></i><span>${esc(s.id)} — git log --releases</span><button type="button" class="term-replay">↻ replay</button></div>
+            <pre class="term-body" data-releases='${esc(JSON.stringify(s.releases))}'></pre>
+          </div>
+        </div>` : ""}
+        ${s.note ? `<p class="sw-note">${esc(s.note)}</p>` : ""}
+        <div class="sw-access">${access}</div>
       </div>
       <aside class="sw-side">
-        <div class="side-title">Toolkit roadmap</div>
+        <div class="side-title">Product roadmap</div>
         ${msHTML(s.roadmap)}
         <div class="side-title">Built with</div>
         ${tagHTML(s.skills || [])}
-        <div class="sw-repo">${s.private
-          ? "🔒 Private repository · demo available on request"
-          : `<a href="${esc(s.repo)}" target="_blank" rel="noopener">View on GitHub ↗</a>`}</div>
       </aside>
     </article>`;
   }).join("");
+
+  // Build-log terminal: types the releases out, one line at a time.
+  function playTerm(pre) {
+    const rel = JSON.parse(pre.dataset.releases);
+    const lines = rel.map((r) => `<span class="t-v">${esc(r.v)}</span> <span class="t-d">${esc(r.date)}</span>  ${esc(r.note)}`);
+    const final = `<span class="t-ok">✓ ${rel.length} releases · next: public launch</span>`;
+    clearTimeout(pre._t);
+    if (reduceMotion) { pre.innerHTML = [...lines, final].join("\n"); return; }
+    pre.innerHTML = "";
+    let i = 0;
+    const next = () => {
+      if (i < lines.length) { pre.innerHTML += (i ? "\n" : "") + lines[i++]; pre.scrollTop = pre.scrollHeight; pre._t = setTimeout(next, 260); }
+      else { pre.innerHTML += "\n" + final + '<span class="t-cursor">▋</span>'; }
+    };
+    next();
+  }
+  $$(".sw-card").forEach((card) => {
+    const tabs = $$(".sw-tab", card);
+    tabs.forEach((tab) => tab.addEventListener("click", () => {
+      tabs.forEach((t) => t.setAttribute("aria-selected", t === tab));
+      $$(".sw-panel", card).forEach((p) => { p.hidden = p.dataset.panel !== tab.dataset.tab; });
+      const pre = $(".term-body", card);
+      if (tab.dataset.tab === "log" && pre && !pre.dataset.played) { pre.dataset.played = 1; playTerm(pre); }
+    }));
+    const replay = $(".term-replay", card);
+    if (replay) replay.addEventListener("click", () => playTerm($(".term-body", card)));
+  });
 
   /* ---------- FILTER HELPER ---------- */
   function makeFilters(container, items, keyOf, labels, onChange) {
@@ -223,10 +268,10 @@
     return `
     <article class="log-entry type-${esc(e.type)}${e.end === "present" ? " ongoing" : ""}" id="log-${esc(e.id)}" data-type="${esc(e.type)}">
       <span class="log-dot" aria-hidden="true"></span>
-      <div class="log-card">
+      <div class="log-card spot">
         <button class="log-head" type="button" aria-expanded="false" aria-controls="logb-${esc(e.id)}"${hasBody ? "" : " disabled"}>
           <div>
-            <div class="log-meta"><span class="pill">${TYPE_LABEL[e.type] || esc(e.type)}</span><span>${esc(fmtRange(e))}</span>${dur ? `<span>· ${esc(dur)}</span>` : ""}${e.end === "present" ? '<span class="pill green">Ongoing</span>' : ""}</div>
+            <div class="log-meta"><span class="pill">${TYPE_LABEL[e.type] || esc(e.type)}</span><span><time datetime="${esc(e.start)}">${esc(window.Site.fmtDate(e.start))}</time>${e.end ? ` – ${e.end === "present" ? "Present" : `<time datetime="${esc(e.end)}">${esc(window.Site.fmtDate(e.end))}</time>`}` : ""}</span>${dur ? `<span>· ${esc(dur)}</span>` : ""}${e.end === "present" ? '<span class="pill green">Ongoing</span>' : ""}</div>
             <h4>${esc(e.title)}</h4>
             <div class="log-org">${esc(e.org)}${e.location ? ` · ${esc(e.location)}` : ""}</div>
           </div>
@@ -270,7 +315,7 @@
   /* ---------- LESSONS ---------- */
   const lessons = [...P.challenges].sort((a, b) => byNewest({ start: a.date }, { start: b.date }));
   $("#lessonList").innerHTML = lessons.map((c) => `
-    <article class="lesson" data-area="${esc(c.area)}">
+    <article class="lesson spot" data-area="${esc(c.area)}">
       <div class="lesson-top"><span>${esc(c.project)} · ${esc(window.Site.fmtDate(c.date))}</span><span class="pill ${c.area === "software" ? "blue" : c.area === "engineering" ? "amber" : "cyan"}">${AREA_LABEL[c.area] || esc(c.area)}</span></div>
       <h4>${esc(c.title)}</h4>
       <dl>
@@ -295,7 +340,7 @@
     const [label, color] = STATUS[g.status] || STATUS.planned;
     const p = pct(g.milestones);
     return `
-    <article class="goal ${esc(g.status)}">
+    <article class="goal spot ${esc(g.status)}">
       <div class="goal-phase"><span>PHASE <b>${esc(g.phase)}</b> — ${esc(g.when.toUpperCase())}</span><span class="pill ${color}">${label}</span></div>
       <h4>${esc(g.title)}</h4>
       <p>${rich(g.desc)}</p>
@@ -307,7 +352,7 @@
 
   /* ---------- CERTS ---------- */
   $("#certGrid").innerHTML = P.certs.map((c) =>
-    `<div class="cert-card${c.featured ? " featured" : ""}"><div class="name">${esc(c.name)}</div><div class="issuer">${esc(c.issuer)}</div></div>`).join("");
+    `<div class="cert-card spot${c.featured ? " featured" : ""}"><div class="name">${esc(c.name)}</div><div class="issuer">${esc(c.issuer)}</div></div>`).join("");
 
   /* ---------- CONTACT ---------- */
   $("#contactLinks").innerHTML = `
@@ -420,6 +465,82 @@
       faultBtn.disabled = false;
       state = "normal";
       faultBtn.focus();
+    });
+  })();
+  /* ---------- HERO TYPEWRITER ---------- */
+  (function typer() {
+    const el = $("#typer");
+    if (!el) return;
+    const words = ["protection & control.", "PLC automation.", "IEC 61850 substations.", "engineering software.", "the road to automotive design."];
+    if (reduceMotion) { el.textContent = words[0]; return; }
+    let w = 0, i = 0, del = false;
+    const tick = () => {
+      const word = words[w];
+      i += del ? -1 : 1;
+      el.textContent = word.slice(0, i);
+      let wait = del ? 28 : 55;
+      if (!del && i === word.length) { del = true; wait = 1600; }
+      else if (del && i === 0) { del = false; w = (w + 1) % words.length; wait = 300; }
+      setTimeout(tick, wait);
+    };
+    tick();
+  })();
+
+  /* ---------- CARD SPOTLIGHT (follows the cursor) ---------- */
+  if (matchMedia("(hover: hover)").matches && !reduceMotion) {
+    document.addEventListener("pointermove", (e) => {
+      const card = e.target.closest(".spot");
+      if (!card) return;
+      const r = card.getBoundingClientRect();
+      card.style.setProperty("--mx", `${e.clientX - r.left}px`);
+      card.style.setProperty("--my", `${e.clientY - r.top}px`);
+    }, { passive: true });
+  }
+
+  /* ---------- COMMAND PALETTE (Ctrl/⌘+K or /) ---------- */
+  (function palette() {
+    const dlg = $("#palette"), input = $("#paletteInput"), list = $("#paletteList");
+    const go = (sel) => () => goTo(sel);
+    const cmds = [
+      ...$$('#navLinks a[href^="#"]').map((a) => ({ label: "Go to " + a.textContent, hint: "section", run: go(a.getAttribute("href")) })),
+      { label: "Inject a fault in the substation diagram", hint: "demo", run: () => { goTo("#top"); setTimeout(() => $("#faultBtn").click(), 500); } },
+      { label: "Play the Analyzer Toolkit build log", hint: "demo", run: () => { const t = $('.sw-tab[data-tab="log"]'); goTo(".sw-card"); t && t.click(); } },
+      { label: "Toggle light / dark theme", hint: "T", run: () => themeBtn.click() },
+      { label: "Open resume", hint: "R", run: () => { location.href = "resume.html"; } },
+      { label: "Copy email address", hint: "action", run: () => $("#copyEmail").click() },
+      { label: "Request early access to Analyzer Toolkit", hint: "action", run: () => { location.href = `mailto:${P.email}?subject=${encodeURIComponent("Analyzer Toolkit — early access")}`; } },
+      ...LOG.map((e) => ({ label: e.title, hint: TYPE_LABEL[e.type].toLowerCase(), run: () => openLog(e.id) })),
+      ...allSkills.map((s) => ({ label: s.name, hint: "skill", run: () => activateSkill(s.name) }))
+    ];
+    let shown = [], sel = 0;
+    const render = () => {
+      const q = input.value.trim().toLowerCase();
+      shown = cmds.filter((c) => !q || c.label.toLowerCase().includes(q) || c.hint.includes(q)).slice(0, 9);
+      sel = Math.min(sel, Math.max(0, shown.length - 1));
+      list.innerHTML = shown.length
+        ? shown.map((c, i) => `<li role="option" id="pal-${i}" aria-selected="${i === sel}" data-i="${i}"><span>${esc(c.label)}</span><kbd>${esc(c.hint)}</kbd></li>`).join("")
+        : '<li class="pal-empty">No matches</li>';
+      input.setAttribute("aria-activedescendant", shown.length ? "pal-" + sel : "");
+    };
+    const open = () => { input.value = ""; sel = 0; render(); dlg.showModal(); input.focus(); };
+    const run = (i) => { const c = shown[i]; if (!c) return; dlg.close(); setTimeout(c.run, 50); };
+    input.addEventListener("input", () => { sel = 0; render(); });
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "ArrowDown") { e.preventDefault(); sel = (sel + 1) % Math.max(1, shown.length); render(); }
+      else if (e.key === "ArrowUp") { e.preventDefault(); sel = (sel - 1 + shown.length) % Math.max(1, shown.length); render(); }
+      else if (e.key === "Enter") { e.preventDefault(); run(sel); }
+    });
+    list.addEventListener("click", (e) => { const li = e.target.closest("[data-i]"); if (li) run(+li.dataset.i); });
+    dlg.addEventListener("click", (e) => { if (e.target === dlg) dlg.close(); });
+    $("#paletteBtn").addEventListener("click", open);
+
+    document.addEventListener("keydown", (e) => {
+      const typing = /input|textarea|select/i.test(document.activeElement.tagName) || dlg.open;
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") { e.preventDefault(); dlg.open ? dlg.close() : open(); return; }
+      if (typing || e.metaKey || e.ctrlKey || e.altKey) return;
+      if (e.key === "/") { e.preventDefault(); open(); }
+      else if (e.key.toLowerCase() === "t") themeBtn.click();
+      else if (e.key.toLowerCase() === "r") location.href = "resume.html";
     });
   })();
 })();
