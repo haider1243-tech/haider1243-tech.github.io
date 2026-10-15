@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Haider Rizvi — Resume</title>
+<meta name="description" content="Resume — Haider Rizvi, Electrical Engineering Technologist (ASET T.T.), Calgary.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='5' fill='%230A0F1C'/%3E%3Cpath d='M13 3 5 14h6l-1 7 8-11h-6l1-7z' fill='%23F2A93B'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{--ink:#0E1A2E; --muted:#4A5B78; --line:#D4DCEA; --accent:#B86E00; --blue:#1E5FBF; --desk:#E7ECF4;}
+*{margin:0; padding:0; box-sizing:border-box;}
+body{background:var(--desk); color:var(--ink); font-family:'IBM Plex Sans', sans-serif; font-size:13.5px; line-height:1.45;}
+.toolbar{position:sticky; top:0; z-index:5; display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; padding:12px 16px; background:#0A0F1C; color:#EDF2FA; font-family:'IBM Plex Mono', monospace; font-size:12.5px;}
+.toolbar a, .toolbar button{color:inherit; text-decoration:none; background:none; border:1px solid #24314C; padding:8px 14px; border-radius:6px; cursor:pointer; font:inherit;}
+.toolbar .primary{background:#F2A93B; border-color:#F2A93B; color:#0A0F1C; font-weight:600;}
+.toolbar .hint{color:#8CA0BE;}
+.page{background:#fff; max-width:8.5in; margin:24px auto; padding:0.6in 0.65in; box-shadow:0 10px 40px rgba(20,40,80,.12);}
+@media (max-width:700px){ .page{margin:0; padding:24px 16px; box-shadow:none;} }
+header{border-bottom:2px solid var(--ink); padding-bottom:10px; margin-bottom:14px;}
+h1{font-family:'Space Grotesk', sans-serif; font-size:28px; line-height:1.1; letter-spacing:-.3px;}
+.role{font-family:'IBM Plex Mono', monospace; font-size:12px; color:var(--accent); letter-spacing:1px; text-transform:uppercase; margin-top:4px;}
+.contact{display:flex; flex-wrap:wrap; gap:4px 14px; margin-top:8px; color:var(--muted); font-size:12.5px;}
+.contact a{color:inherit; text-decoration:none;}
+h2{font-family:'IBM Plex Mono', monospace; font-size:11.5px; letter-spacing:2px; text-transform:uppercase; color:var(--blue); border-bottom:1px solid var(--line); padding-bottom:3px; margin:16px 0 8px;}
+.summary{color:var(--ink);}
+.skills{display:grid; grid-template-columns:auto 1fr; gap:3px 12px;}
+.skills dt{font-weight:600; white-space:nowrap;}
+.skills dd{color:var(--muted);}
+@media (max-width:600px){ .skills{grid-template-columns:1fr;} .skills dd{margin-bottom:6px;} }
+.item{margin-bottom:10px; break-inside:avoid;}
+.item-head{display:flex; justify-content:space-between; gap:12px; align-items:baseline; flex-wrap:wrap;}
+.item-head h3{font-family:'Space Grotesk', sans-serif; font-size:14.5px; font-weight:700;}
+.item-head .when{font-family:'IBM Plex Mono', monospace; font-size:11.5px; color:var(--muted); white-space:nowrap;}
+.org{color:var(--muted); font-size:12.5px;}
+.item p{margin-top:3px;}
+ul{margin:4px 0 0 16px;}
+li{margin-bottom:2px;}
+li::marker{color:var(--accent);}
+.certs{display:flex; flex-wrap:wrap; gap:4px 18px;}
+.foot{margin-top:18px; font-size:11px; color:var(--muted); font-family:'IBM Plex Mono', monospace;}
+@page{size:letter; margin:0.45in 0.5in;}
+@media print{
+  body{background:#fff; font-size:11.5px;}
+  .toolbar{display:none;}
+  .page{margin:0; padding:0; max-width:none; box-shadow:none;}
+  h1{font-size:24px;}
+  a{color:inherit;}
+  .foot{display:none;}
+}
+</style>
+</head>
+<body>
+<div class="toolbar">
+  <a href="index.html">← Back to site</a>
+  <span class="hint">Generated from data/profile.js</span>
+  <button class="primary" type="button" onclick="window.print()">Print / Save as PDF</button>
+</div>
+
+<main class="page" id="resume">
+  <noscript>Turn on JavaScript to view the resume.</noscript>
+</main>
+
+<script src="data/profile.js"></script>
+<script src="assets/common.js"></script>
+<script>
+(() => {
+  const P = window.PROFILE;
+  const { esc, rich, fmtRange, byNewest } = window.Site;
+  const log = P.log.filter((e) => e.resume !== false).sort(byNewest);
+  const of = (type) => log.filter((e) => e.type === type);
+
+  const item = (e) => `
+    <div class="item">
+      <div class="item-head"><h3>${esc(e.title)}</h3><span class="when">${esc(fmtRange(e))}</span></div>
+      <div class="org">${esc(e.org)}${e.location ? " · " + esc(e.location) : ""}</div>
+      ${e.details && e.details.length
+        ? `<ul>${e.details.map((d) => `<li>${rich(d)}</li>`).join("")}</ul>`
+        : e.summary ? `<p>${rich(e.summary)}</p>` : ""}
+    </div>`;
+
+  const section = (title, html) => (html ? `<h2>${title}</h2>${html}` : "");
+
+  const software = P.software.map((s) => `
+    <div class="item">
+      <div class="item-head"><h3>${esc(s.name)} <span class="org">(${esc(s.version)})</span></h3><span class="when">${esc(fmtRange({ start: s.start, end: s.status === "active" ? "present" : undefined }))}</span></div>
+      <div class="org">${rich(s.tagline)}</div>
+      <ul>${s.features.slice(0, 4).map((f) => `<li>${rich(f)}</li>`).join("")}</ul>
+    </div>`).join("");
+
+  document.getElementById("resume").innerHTML = `
+    <header>
+      <h1>${esc(P.name)}</h1>
+      <div class="role">${esc(P.title)} · ${esc(P.designation)}</div>
+      <div class="contact">
+        <span>${esc(P.location)}</span>
+        <a href="tel:${esc(P.phoneHref)}">${esc(P.phone)}</a>
+        <a href="mailto:${esc(P.email)}">${esc(P.email)}</a>
+        <a href="${esc(P.linkedin)}">${esc(P.linkedin.replace(/^https?:\/\//, ""))}</a>
+        <span>${esc(P.workStatus)}</span>
+      </div>
+    </header>
+
+    ${section("Summary", `<p class="summary">${rich(P.summary)}</p>`)}
+
+    ${section("Technical Skills", `<dl class="skills">${P.skills.map((g) =>
+      `<dt>${esc(g.group)}</dt><dd>${g.items.map((s) => esc(s.name) + (s.learning ? " (learning)" : "")).join(", ")}</dd>`).join("")}</dl>`)}
+
+    ${section("Projects", of("project").filter((e) => e.id !== "analyzer-toolkit-log").map(item).join("") + software)}
+    ${section("Experience", of("work").map(item).join(""))}
+    ${section("Education", of("education").map(item).join(""))}
+    ${section("Certifications", `<div class="certs">${P.certs.filter((c) => c.kind === "cert").map((c) =>
+      `<span><b>${esc(c.name)}</b> — ${esc(c.issuer)}</span>`).join("")}</div>`)}
+    ${section("Languages", `<p>${esc(P.languages)}</p>`)}
+
+    <p class="foot">Last updated ${esc(window.Site.fmtDate(P.updated))} · Full portfolio and pathway log at the main site.</p>`;
+})();
+</script>
+</body>
+</html>
