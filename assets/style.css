@@ -251,7 +251,7 @@ section{position:relative; z-index:1; padding:100px 6vw;}
 .journey-track{position:relative; display:flex; overflow-x:auto; padding-bottom:12px;}
 .journey-track::-webkit-scrollbar{height:6px;}
 .journey-track::-webkit-scrollbar-thumb{background:var(--line); border-radius:3px;}
-.j-node{flex:1 1 0; min-width:220px; position:relative; padding:0 18px 0 0;}
+.j-node{flex:1 1 0; min-width:150px; position:relative; padding:0 18px 0 0;}
 .j-node .j-line{position:absolute; top:19px; left:0; right:-18px; height:2px; background:linear-gradient(90deg, var(--muted-2), var(--line));}
 .j-dot{
   width:38px; height:38px; border-radius:50%; display:flex; align-items:center; justify-content:center;
@@ -320,8 +320,10 @@ section{position:relative; z-index:1; padding:100px 6vw;}
 .capstone-hidden.open{grid-template-rows:1fr;}
 
 /* ---------- SOFTWARE ---------- */
-.sw-card{border:1px solid var(--line); background:var(--surface); border-radius:12px; overflow:hidden; display:grid; grid-template-columns:1.25fr 0.75fr;}
-@media (max-width:860px){ .sw-card{grid-template-columns:1fr;} }
+.sw-card{border:1px solid var(--line); background:var(--surface); border-radius:12px; overflow:hidden; display:grid; grid-template-columns:minmax(0,1.25fr) minmax(0,0.75fr);}
+@media (max-width:860px){ .sw-card{grid-template-columns:minmax(0,1fr);} }
+.sw-main, .sw-side, .log-card, .goal, .lesson{min-width:0;}
+.sw-desc, .sw-tagline, .bullet-list li, .lesson dd{overflow-wrap:anywhere;}
 .sw-main{padding:36px;}
 .sw-side{padding:36px; background:var(--surface-2); border-left:1px solid var(--line);}
 @media (max-width:860px){ .sw-side{border-left:none; border-top:1px solid var(--line);} }
@@ -548,3 +550,13 @@ kbd{font-family:'IBM Plex Mono', monospace; font-size:10.5px; padding:1px 6px; b
 .sw-lock{font-family:'IBM Plex Mono', monospace; font-size:12px; color:var(--muted-2);}
 .nav-links .mobile-only{display:none;}
 @media (max-width:600px){ .nav-links .mobile-only{display:block; color:var(--amber);} }
+
+/* Journey: vertical on phones instead of a sideways scroller */
+@media (max-width:700px){
+  .journey-track{flex-direction:column; overflow:visible; padding-bottom:0;}
+  .j-node{min-width:0; padding:0 0 28px 56px;}
+  .j-node:last-child{padding-bottom:0;}
+  .j-dot{position:absolute; left:0; top:0; margin:0;}
+  .j-node .j-line{top:38px; bottom:0; left:18px; right:auto; width:2px; height:auto; background:linear-gradient(var(--muted-2), var(--line));}
+  .j-node p{padding-right:0;}
+}
