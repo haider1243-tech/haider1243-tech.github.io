@@ -100,19 +100,20 @@
     ["CREDENTIAL", "EET Diploma, SAIT — April 2026"],
     ["DESIGNATION", P.designation],
     ["WORK STATUS", P.workStatus],
-    ["FOCUS AREAS", "Protection · Controls · Automation"],
-    ["SEEKING", "Technologist · Controls · Testing · Field service"],
+    ["CURRENTLY", `${P.currentRole.title}, ${P.currentRole.org}`],
+    ["INDUSTRY", P.currentRole.industry],
+    ["GROWING INTO", "Automotive electrical & EV"],
     ["LANGUAGES", P.languages]
   ].map(([k, v]) => `<div class="spec-row"><span class="k">${esc(k)}</span><span class="v">${esc(v)}</span></div>`).join("");
 
   const allSkills = P.skills.flatMap((g) => g.items);
-  const milestones = P.goals.flatMap((g) => g.milestones);
+  const milestones = P.roadmap;
   const msDone = milestones.filter((m) => m.state === "done").length;
   const stats = [
     { n: new Date().getFullYear() - P.startYear, label: "Years in engineering" },
     { n: allSkills.filter((s) => !s.learning).length, label: "Tools used hands-on" },
     { n: P.certs.filter((c) => c.kind === "cert").length, label: "Certifications & registrations" },
-    { n: msDone, suffix: ` / ${milestones.length}`, label: "Goal milestones hit" }
+    { n: msDone, suffix: ` / ${milestones.length}`, label: "Roadmap milestones hit" }
   ];
   $("#stats").innerHTML = stats.map((s) =>
     `<div class="stat"><div class="num"><span data-count="${s.n}">${reduceMotion ? s.n : 0}</span>${s.suffix ? `<small>${esc(s.suffix)}</small>` : ""}</div><div class="lbl">${esc(s.label)}</div></div>`
@@ -329,27 +330,86 @@
     $$(".lesson").forEach((el) => { el.hidden = !(k === "all" || el.dataset.area === k); });
   });
 
-  /* ---------- GOALS ---------- */
+  /* ---------- ROADMAP ---------- */
+  const TRACKS = {
+    credentials: { label: "Credentials", color: "blueprint", blurb: "T.T. → C.E.T. → P.Tech" },
+    oilgas: { label: "Oil & Gas", color: "amber", blurb: "Analyzers · instrumentation · safety" },
+    automotive: { label: "Automotive", color: "cyan", blurb: "Vehicle electrical · EV · ADAS" },
+    bridge: { label: "Both industries", color: "green", blurb: "Skills that carry across" }
+  };
+  const PHASES = [
+    { key: "done", label: "Done", sub: "Foundation in place", test: (m) => m.state === "done" },
+    { key: "now", label: "Now", sub: "2026 – 2027", test: (m) => m.state !== "done" && m.target <= 2027 },
+    { key: "next", label: "Next", sub: "2028", test: (m) => m.state !== "done" && m.target === 2028 },
+    { key: "mid", label: "Mid-term", sub: "2029 – 2030", test: (m) => m.state !== "done" && m.target >= 2029 && m.target <= 2030 },
+    { key: "long", label: "Long-term", sub: "2031 +", test: (m) => m.state !== "done" && m.target >= 2031 }
+  ];
+  const STATE = { done: ["Done", "cyan"], active: ["In progress", "amber"], todo: ["Planned", ""] };
   const pct = (list) => list.length ? Math.round((list.filter((m) => m.state === "done").length / list.length) * 100) : 0;
-  const overall = pct(milestones);
-  $("#goalOverall").innerHTML = `
-    <div><div class="big">${overall}%</div><div class="desc">Overall pathway</div></div>
-    <div class="bar" role="progressbar" aria-valuenow="${overall}" aria-valuemin="0" aria-valuemax="100" aria-label="Overall progress"><span data-w="${overall}"></span></div>
-    <div class="desc">${msDone} of ${milestones.length} milestones · ${P.goals.filter((g) => g.status === "active").length} goals in progress</div>`;
+  const clockPct = (c) => {
+    const d = window.Site.parseDate(c.from), now = new Date();
+    const months = Math.max(0, (now.getFullYear() - d.y) * 12 + (now.getMonth() + 1 - d.m));
+    return { months: Math.min(months, c.months), of: c.months, p: Math.min(100, Math.round((months / c.months) * 100)) };
+  };
 
-  $("#goalGrid").innerHTML = P.goals.map((g) => {
-    const [label, color] = STATUS[g.status] || STATUS.planned;
-    const p = pct(g.milestones);
+  const cetClock = P.roadmap.find((m) => m.clock);
+  const cc = cetClock && clockPct(cetClock.clock);
+  $("#roadmapTracks").innerHTML = Object.entries(TRACKS).map(([k, t]) => {
+    const list = P.roadmap.filter((m) => m.track === k), p = pct(list);
+    return `<button type="button" class="track-card spot" data-track="${k}" aria-pressed="false" style="--tc:var(--${t.color})">
+      <span class="track-name">${esc(t.label)}</span>
+      <span class="track-blurb">${esc(t.blurb)}</span>
+      <span class="bar"><span data-w="${p}"></span></span>
+      <span class="track-meta">${list.filter((m) => m.state === "done").length}/${list.length} done · ${list.filter((m) => m.state === "active").length} active</span>
+    </button>`;
+  }).join("") + (cc ? `
+    <div class="track-card clock" style="--tc:var(--amber)">
+      <span class="track-name">C.E.T. experience clock</span>
+      <span class="track-blurb">${cc.months} of ${cc.of} months logged</span>
+      <span class="bar"><span data-w="${cc.p}"></span></span>
+      <span class="track-meta">Started ${esc(window.Site.fmtDate(cetClock.clock.from))} · target ${cetClock.target}</span>
+    </div>` : "");
+
+  $("#roadmapPhases").innerHTML = PHASES.map((ph) => {
+    const items = P.roadmap.filter(ph.test).sort((a, b) => a.target - b.target);
+    if (!items.length) return "";
+    if (ph.key === "done") return `
+    <div class="phase phase-done">
+      <div class="phase-head"><span class="phase-dot" aria-hidden="true"></span><h3>${ph.label}</h3><span class="phase-sub">${ph.sub}</span></div>
+      <ul class="done-list">${items.map((m) => `<li class="rm" data-track="${esc(m.track)}" style="--tc:var(--${TRACKS[m.track].color})">
+        <span class="ms-check" aria-hidden="true">✓</span><span class="dl-title">${esc(m.title)}</span><span class="rm-track">${esc(TRACKS[m.track].label)} · ${m.target}</span></li>`).join("")}</ul>
+    </div>`;
     return `
-    <article class="goal spot ${esc(g.status)}">
-      <div class="goal-phase"><span>PHASE <b>${esc(g.phase)}</b> — ${esc(g.when.toUpperCase())}</span><span class="pill ${color}">${label}</span></div>
-      <h4>${esc(g.title)}</h4>
-      <p>${rich(g.desc)}</p>
-      <div class="goal-progress"><div class="bar" role="progressbar" aria-valuenow="${p}" aria-valuemin="0" aria-valuemax="100" aria-label="${esc(g.title)} progress"><span data-w="${p}"></span></div><span>${p}%</span></div>
-      ${msHTML(g.milestones)}
-      <div class="goal-meta">${esc(g.area)}</div>
-    </article>`;
+    <div class="phase phase-${ph.key}">
+      <div class="phase-head"><span class="phase-dot" aria-hidden="true"></span><h3>${ph.label}</h3><span class="phase-sub">${ph.sub}</span></div>
+      <div class="phase-grid">
+        ${items.map((m) => {
+          const t = TRACKS[m.track], [sl, sc] = STATE[m.state] || STATE.todo, c = m.clock && clockPct(m.clock);
+          return `<article class="rm spot ${esc(m.state)}" data-track="${esc(m.track)}" style="--tc:var(--${t.color})">
+            <div class="rm-top"><span class="rm-track">${esc(t.label)}</span><span class="pill ${sc}">${sl}</span></div>
+            <h4>${esc(m.title)}</h4>
+            <p>${rich(m.detail)}</p>
+            ${c ? `<div class="goal-progress"><div class="bar"><span data-w="${c.p}"></span></div><span>${c.months}/${c.of} mo</span></div>` : ""}
+            <div class="rm-foot"><span>${m.since ? `Since ${esc(window.Site.fmtDate(m.since))}` : m.state === "active" ? `Through ${m.target}` : `Target ${m.target}`}</span>${m.evidence ? `<span class="rm-ev">${esc(m.evidence)}</span>` : ""}</div>
+          </article>`;
+        }).join("")}
+      </div>
+    </div>`;
   }).join("");
+
+  // Tap a track to focus it; tap again (or "All") to show everything.
+  const rmFilter = $("#roadmapFilter");
+  let activeTrack = "all";
+  const setTrack = (k) => {
+    activeTrack = activeTrack === k ? "all" : k;
+    $$(".track-card[data-track]").forEach((b) => b.setAttribute("aria-pressed", b.dataset.track === activeTrack));
+    $$(".rm").forEach((el) => { el.hidden = !(activeTrack === "all" || el.dataset.track === activeTrack); });
+    $$(".phase").forEach((ph) => { ph.hidden = !$$(".rm", ph).some((el) => !el.hidden); });
+    rmFilter.hidden = activeTrack === "all";
+    rmFilter.querySelector("b").textContent = activeTrack === "all" ? "" : TRACKS[activeTrack].label;
+  };
+  $$(".track-card[data-track]").forEach((b) => b.addEventListener("click", () => setTrack(b.dataset.track)));
+  rmFilter.querySelector("button").addEventListener("click", () => setTrack(activeTrack));
 
   /* ---------- CERTS ---------- */
   $("#certGrid").innerHTML = P.certs.map((c) =>
@@ -472,7 +532,7 @@
   (function typer() {
     const el = $("#typer");
     if (!el) return;
-    const words = ["protection & control.", "PLC automation.", "IEC 61850 substations.", "engineering software.", "the road to automotive design."];
+    const words = ["analyzer systems for oil & gas.", "protection & control.", "engineering software.", "toward C.E.T.", "vehicle electrical & EV."];
     if (reduceMotion) { el.textContent = words[0]; return; }
     let w = 0, i = 0, del = false;
     const tick = () => {
@@ -506,6 +566,7 @@
       ...$$('#navLinks a[href^="#"]').map((a) => ({ label: "Go to " + a.textContent, hint: "section", run: go(a.getAttribute("href")) })),
       { label: "Inject a fault in the substation diagram", hint: "demo", run: () => { goTo("#top"); setTimeout(() => $("#faultBtn").click(), 500); } },
       { label: "Play the Analyzer Toolkit build log", hint: "demo", run: () => { const t = $('.sw-tab[data-tab="log"]'); goTo(".sw-card"); t && t.click(); } },
+      ...Object.entries(TRACKS).map(([k, t]) => ({ label: `Roadmap: ${t.label} track`, hint: "roadmap", run: () => { goTo("#roadmap"); if (activeTrack !== k) setTrack(k); } })),
       { label: "Toggle light / dark theme", hint: "T", run: () => themeBtn.click() },
       { label: "Open resume", hint: "R", run: () => { location.href = "resume.html"; } },
       { label: "Copy email address", hint: "action", run: () => $("#copyEmail").click() },

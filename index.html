@@ -23,7 +23,8 @@
       "@type": "Person",
       "@id": "https://haider1243-tech.github.io/#person",
       "name": "Haider Rizvi",
-      "jobTitle": "Electrical Engineering Technologist",
+      "jobTitle": "Junior Design Drafter",
+      "worksFor": { "@type": "Organization", "name": "Insight Analytical Solutions" },
       "url": "https://haider1243-tech.github.io/",
       "email": "mailto:hasanhaider2001@gmail.com",
       "address": { "@type": "PostalAddress", "addressLocality": "Calgary", "addressRegion": "AB", "addressCountry": "CA" },
@@ -32,7 +33,7 @@
         { "@type": "CollegeOrUniversity", "name": "University of Calgary" }
       ],
       "hasCredential": { "@type": "EducationalOccupationalCredential", "name": "Technologist-in-Training (T.T.)", "recognizedBy": { "@type": "Organization", "name": "ASET" } },
-      "knowsAbout": ["Protection relays", "IEC 61850 GOOSE", "PLC programming", "SCADA", "DNP3", "AutoCAD Electrical", "SolidWorks", "Process analyzer systems"],
+      "knowsAbout": ["Process analyzer systems", "Oil and gas design drafting", "Protection relays", "IEC 61850 GOOSE", "PLC programming", "SCADA", "DNP3", "AutoCAD Electrical", "SolidWorks"],
       "knowsLanguage": ["English", "Urdu", "Hindi"],
       "sameAs": ["https://linkedin.com/in/haiderizvi", "https://github.com/haider1243-tech"]
     },
@@ -74,7 +75,7 @@
     <a href="#software">Software</a>
     <a href="#logbook">Logbook</a>
     <a href="#lessons">Lessons</a>
-    <a href="#goals">Goals</a>
+    <a href="#roadmap">Roadmap</a>
     <a href="#contact">Contact</a>
     <a href="resume.html" class="mobile-only">Resume ↗</a>
   </div>
@@ -95,7 +96,7 @@
       <span class="eyebrow">Electrical Engineering Technologist</span>
       <h1 id="hero-title" style="margin-top:14px;">Protection, controls<br>&amp; <span class="accent">automation</span>.</h1>
       <p class="typer-line" aria-hidden="true"><span class="prompt">&gt;</span> building <span id="typer" class="typer"></span><span class="caret">▋</span></p>
-      <p class="lede">SAIT EET graduate. Relay configuration, PLC automation, and AutoCAD design — verified in the lab, ready for the field. Currently building <b>Analyzer Toolkit</b> — an engineering software product, launching soon.</p>
+      <p class="lede"><b>Junior Design Drafter at Insight Analytical Solutions</b> — process analyzer systems for oil &amp; gas. SAIT EET graduate with relay, PLC, and AutoCAD experience, building <b>Analyzer Toolkit</b> on the side and growing toward automotive electrical design.</p>
 
       <div class="tt-badge">
         <span class="dot"></span> ASET Technologist-in-Training (T.T.) — Registered &amp; Active
@@ -103,7 +104,7 @@
 
       <div class="hero-ctas">
         <a href="#capstone" class="btn btn-primary">View Capstone Project</a>
-        <a href="#logbook" class="btn btn-outline">Follow the Pathway →</a>
+        <a href="#roadmap" class="btn btn-outline">See the Roadmap →</a>
         <a href="#software" class="btn btn-outline">What I'm Building</a>
       </div>
       <p class="kbd-hint">Tip: press <kbd>/</kbd> to search the site · <kbd>T</kbd> theme · <kbd>R</kbd> resume</p>
@@ -182,7 +183,7 @@
   <div class="section-inner">
     <div class="section-head reveal">
       <span class="eyebrow">The Path Here</span>
-      <h2 id="journey-title">Mechanical roots, electrical focus, automotive horizon.</h2>
+      <h2 id="journey-title">Mechanical roots, electrical focus, two industries ahead.</h2>
       <p>Every switch was a real choice — kept what stuck, moved on from what didn't.</p>
     </div>
 
@@ -203,16 +204,16 @@
       </div>
       <div class="j-node now">
         <div class="j-line"></div>
-        <div class="j-dot">⌨</div>
-        <div class="j-tag">2026 — Now</div>
-        <h4>Engineering Software</h4>
-        <p>Building tools that put both disciplines to work — starting with the Analyzer Toolkit.</p>
+        <div class="j-dot">🛢</div>
+        <div class="j-tag">Sep 2026 — Now</div>
+        <h4>Oil &amp; Gas Design</h4>
+        <p>Junior Design Drafter at Insight Analytical Solutions — process analyzer systems. Building Analyzer Toolkit alongside.</p>
       </div>
       <div class="j-node next">
         <div class="j-dot">🚗</div>
-        <div class="j-tag">The Horizon</div>
-        <h4>Automotive Design</h4>
-        <p>Where mechanical and electrical actually meet. The long-term direction, tracked in Goals.</p>
+        <div class="j-tag">Alongside</div>
+        <h4>Automotive Electrical</h4>
+        <p>Vehicle electrical, EV, and functional safety — grown side by side with oil &amp; gas. Mapped in the Roadmap.</p>
       </div>
     </div>
   </div>
@@ -302,16 +303,17 @@
   </div>
 </section>
 
-<!-- GOALS -->
-<section id="goals" aria-labelledby="goals-title">
+<!-- ROADMAP -->
+<section id="roadmap" aria-labelledby="roadmap-title">
   <div class="section-inner">
     <div class="section-head reveal">
-      <span class="eyebrow">Goals Tracker</span>
-      <h2 id="goals-title">Where I am, and the road to automotive design.</h2>
-      <p>Mechanical roots, electrical depth — progress is tracked milestone by milestone.</p>
+      <span class="eyebrow">Engineering Roadmap</span>
+      <h2 id="roadmap-title">Oil &amp; gas today, automotive alongside.</h2>
+      <p>Two industries, grown side by side on one credential path. They share more than it looks: plant safety systems (IEC 61511) and vehicle safety (ISO 26262) both come from the same parent standard, IEC 61508. Tap a track to focus it.</p>
     </div>
-    <div class="goal-overall reveal" id="goalOverall"></div>
-    <div class="goal-grid reveal" id="goalGrid"></div>
+    <div class="track-row reveal" id="roadmapTracks"></div>
+    <div class="rm-filter" id="roadmapFilter" hidden>Showing <b></b> only · <button type="button">Show all</button></div>
+    <div class="phases reveal" id="roadmapPhases"></div>
   </div>
 </section>
 
@@ -331,8 +333,8 @@
   <div class="section-inner">
     <div class="contact-card reveal">
       <span class="eyebrow">Get In Touch</span>
-      <h2 id="contact-title" style="margin-top:14px;">Let's talk protection, controls, or your next field role.</h2>
-      <p>Open to entry-level electrical technologist, automation/controls, testing, field service, and design support roles across Calgary and beyond.</p>
+      <h2 id="contact-title" style="margin-top:14px;">Let's talk analyzers, controls, or vehicle electrical.</h2>
+      <p>Happy to connect on analyzer systems, instrumentation, protection &amp; controls, and automotive electrical projects. For anything outside engineering, LinkedIn has the rest.</p>
       <div class="contact-links" id="contactLinks"></div>
     </div>
   </div>

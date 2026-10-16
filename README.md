@@ -21,7 +21,7 @@ Open `data/profile.js` and add to the right list. The comments at the top of eac
 
 - **New job / course / project** → add to `log` (`type: "work" | "education" | "project" | "milestone"`). Use `end: "present"` while it's ongoing; durations and "Ongoing" badges are calculated automatically.
 - **Problem you solved** → add to `challenges` with `problem`, `fix`, and `lesson`.
-- **Goal progress** → in `goals`, flip a milestone's `state` from `"todo"` → `"active"` → `"done"`. Progress bars and the overall % update themselves.
+- **Roadmap progress** → in `roadmap`, flip a milestone's `state` from `"todo"` → `"active"` → `"done"`. Tracks: `credentials`, `oilgas`, `automotive`, `bridge`. `target` (year) decides which phase it shows in; the C.E.T. experience clock fills itself from `clock.from`.
 - **New skill** → add to a group in `skills`. List the same name in a log entry's `skills` to link them both ways.
 - **New software project** → add to `software`. Leave `launched: false` to show it as in development with no link; set `launched: true` and `url` when it's public.
 - Bump `updated` at the top so the footer and resume show the right date.

@@ -101,8 +101,10 @@ li::marker{color:var(--accent);}
       ${bullets(s.features.slice(0, 4))}
     </div>`).join("");
 
-  const work = of("work").map((e) => `
-    <div class="item">${head(esc(e.title), fmtRange(e), where(e))}${e.details?.length ? bullets(e.details) : e.summary ? `<ul><li>${rich(e.summary)}</li></ul>` : ""}</div>`).join("");
+  const workItem = (e) => `
+    <div class="item">${head(esc(e.title), fmtRange(e), where(e))}${e.details?.length ? bullets(e.details) : e.summary ? `<ul><li>${rich(e.summary)}</li></ul>` : ""}</div>`;
+  const professional = of("work").filter((e) => e.site !== false).map(workItem).join("");
+  const additional = of("work").filter((e) => e.site === false).map(workItem).join("");
 
   document.getElementById("resume").innerHTML = `
     <header>
@@ -117,13 +119,14 @@ li::marker{color:var(--accent);}
     </header>
 
     ${section("Summary", `<p class="summary">${rich(P.summary)}</p>`)}
+    ${section("Professional Experience", professional)}
     ${section("Education", education)}
     ${section("Core Technical Skills", `<dl class="skills">${P.skills.map((g) =>
       `<dt>${esc(g.group)}</dt><dd>${g.items.map((s) => esc(s.name) + (s.learning ? " (learning)" : "")).join(", ")}</dd>`).join("")}</dl>`)}
     ${section("Technical Experience", technical)}
     ${section("Capstone Project", projects)}
     ${section("Software Project", software)}
-    ${section("Additional Work Experience", work)}
+    ${section("Additional Work Experience", additional)}
     ${section("Certifications", `<div class="certs">${P.certs.filter((c) => c.kind === "cert").map((c) =>
       `<span><b>${esc(c.name)}</b> — ${esc(c.issuer)}</span>`).join("")}</div>`)}
     ${section("Languages", `<p>${esc(P.languages)}</p>`)}

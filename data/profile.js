@@ -20,6 +20,7 @@ window.PROFILE = {
 
   name: "Haider Rizvi",
   title: "Electrical Engineering Technologist",
+  currentRole: { title: "Junior Design Drafter", org: "Insight Analytical Solutions", since: "2026-09", industry: "Oil & gas · process analyzer systems" },
   designation: "Technologist-in-Training (T.T.), ASET",
   location: "Calgary, Alberta, Canada",
   email: "hasanhaider2001@gmail.com",
@@ -30,8 +31,8 @@ window.PROFILE = {
   startYear: 2021, // first year in engineering — drives the "years" stat
 
   summary:
-    "**SAIT Electrical Engineering Technology Graduate (2026)** and ASET Technologist-in-Training with practical lab and capstone project experience. Proficient in **Rockwell PLC/HMI programming**, industrial networking, and **SEL protective relay** configuration. Skilled in **AutoCAD drafting** and applying **CEC criteria** for wire and conduit sizing. Combines technical troubleshooting with standard field safety practices (**LOTO, FLHA**), and builds browser-based engineering software for process analyzer systems. Seeking an entry-level electrical technologist, automation/controls, testing, field service, or design support role.",
-  seeking: "Entry-level electrical technologist, automation/controls, testing, field service, or design support roles",
+    "**Junior Design Drafter at Insight Analytical Solutions** in Alberta's oil & gas sector, and an ASET Technologist-in-Training. **SAIT Electrical Engineering Technology graduate (2026)** with practical lab and capstone experience — **Rockwell PLC/HMI programming**, industrial networking, **SEL protective relay** configuration, **AutoCAD drafting**, and **CEC** wire and conduit sizing. Field-safety trained (**LOTO, FLHA**). Builds browser-based engineering software for process analyzer systems, and is working toward C.E.T. while growing into automotive electrical design alongside oil & gas.",
+  focus: "Analyzer systems & instrumentation (oil & gas) · Vehicle electrical & EV (automotive)",
 
   /* ---------------- SKILLS ----------------
      color: "blueprint" | "amber" | "cyan"
@@ -142,6 +143,16 @@ window.PROFILE = {
   /* ---------------- PATHWAY LOGBOOK ----------------
      type: "work" | "education" | "project" | "milestone" */
   log: [
+    {
+      id: "insight", type: "work",
+      start: "2026-09", end: "present",
+      title: "Junior Design Drafter",
+      org: "Insight Analytical Solutions", location: "Calgary, AB · Oil & gas",
+      summary: "Design drafting for process analyzer systems in the oil & gas industry.",
+      details: [],
+      skills: [],
+      resume: true
+    },
     {
       id: "analyzer-toolkit-log", type: "project",
       start: "2026-10", end: "present",
@@ -260,72 +271,74 @@ window.PROFILE = {
     }
   ],
 
-  /* ---------------- GOALS TRACKER ----------------
-     status: "done" | "active" | "planned"
-     milestone state: "done" | "active" | "todo"  (progress = done / total) */
-  goals: [
-    {
-      phase: "00", when: "2024 – 2026", title: "Technologist Foundation", area: "Electrical", status: "done",
-      desc: "Diploma, professional registration, and a verified capstone.",
-      milestones: [
-        { text: "EET Diploma — SAIT", state: "done" },
-        { text: "ASET Technologist-in-Training registration", state: "done" },
-        { text: "Capstone: verified GOOSE trip (sub-10 ms)", state: "done" }
-      ]
-    },
-    {
-      phase: "00", when: "Now", title: "Ship Analyzer Toolkit", area: "Software", status: "active",
-      desc: "Grow the toolkit from one tool into a full set of analyzer system checks — then launch it as a paid product with its own website.",
-      milestones: [
-        { text: "Probe insertion check (v3.4)", state: "done" },
-        { text: "Analyzer config checker", state: "todo" },
-        { text: "Wake frequency tool", state: "todo" },
-        { text: "Sample lag time tool", state: "todo" },
-        { text: "Product website", state: "active" },
-        { text: "Public (paid) launch", state: "todo" }
-      ]
-    },
-    {
-      phase: "00", when: "Now", title: "Add Revit to the AutoCAD foundation", area: "Design", status: "active",
-      desc: "BIM-based design on top of AutoCAD Electrical fundamentals.",
-      milestones: [
-        { text: "AutoCAD Electrical fundamentals", state: "done" },
-        { text: "Revit fundamentals", state: "active" },
-        { text: "First complete Revit model", state: "todo" }
-      ]
-    },
-    {
-      phase: "01", when: "Year one", title: "Vehicle Electrical Architecture", area: "Electrical", status: "planned",
-      desc: "Mapping wiring harnesses, fusing, and low-voltage distribution — applying protection and control fundamentals to a smaller-scale, higher-stakes system.",
-      milestones: [
-        { text: "Wiring harness & fusing fundamentals", state: "todo" },
-        { text: "Low-voltage distribution", state: "todo" }
-      ]
-    },
-    {
-      phase: "02", when: "Year two", title: "EV Powertrain Control", area: "Electrical", status: "planned",
-      desc: "Battery management systems and motor control logic — a direct extension of relay and PLC thinking into automotive-scale systems.",
-      milestones: [
-        { text: "Battery management systems", state: "todo" },
-        { text: "Motor control logic", state: "todo" }
-      ]
-    },
-    {
-      phase: "03", when: "Ongoing", title: "Chassis & Component Design", area: "Mechanical", status: "planned",
-      desc: "Back to SolidWorks — the software that started it all — modeling automotive components against real structural and mechanical constraints.",
-      milestones: [
-        { text: "SolidWorks refresh", state: "todo" },
-        { text: "Model a component against real constraints", state: "todo" }
-      ]
-    },
-    {
-      phase: "04", when: "Year three+", title: "Sensor & ADAS Integration", area: "Electrical + Mechanical", status: "planned",
-      desc: "Protection-relay logic — detect, decide, act — applied to driver-assist sensor systems once the fundamentals above are locked in.",
-      milestones: [
-        { text: "Sensor fundamentals", state: "todo" },
-        { text: "Detect → decide → act logic for ADAS", state: "todo" }
-      ]
-    }
+  /* ---------------- ENGINEERING ROADMAP ----------------
+     Four tracks, grown side by side:
+       credentials — the Alberta professional path (T.T. -> C.E.T. -> P.Tech)
+       oilgas      — the industry I work in: analyzers, instrumentation, safety
+       automotive  — vehicle electrical, EV, functional safety
+       bridge      — skills that carry across both industries
+     state: "done" | "active" | "todo"
+     target: year it's planned for (drives which phase it shows in)
+     since: "YYYY-MM" -> shown as "Since …" instead of a target (for ongoing roles)
+     clock: { from: "YYYY-MM", months: N } -> live progress bar (e.g. C.E.T. experience)
+     evidence: what proves it (a project, cert, or role) — shown on the card */
+  roadmap: [
+    // ---- Credentials ----
+    { track: "credentials", state: "done", target: 2026, title: "EET Diploma — SAIT",
+      detail: "Electrical Engineering Technology, April 2026.", evidence: "Diploma" },
+    { track: "credentials", state: "done", target: 2026, title: "ASET Technologist-in-Training (T.T.)",
+      detail: "Registered with ASET — the first step on the Alberta technologist path.", evidence: "Active registration" },
+    { track: "credentials", state: "active", target: 2028, title: "Log 2 years of technologist-level experience",
+      detail: "C.E.T. needs 2 years of acceptable technical experience within the last 5. The clock started with my first design role.",
+      clock: { from: "2026-09", months: 24 }, evidence: "Insight Analytical Solutions" },
+    { track: "credentials", state: "todo", target: 2028, title: "Certified Engineering Technologist (C.E.T.)",
+      detail: "Apply to ASET with references, a competency report, and the ethics exam." },
+    { track: "credentials", state: "todo", target: 2032, title: "Professional Technologist (P.Tech) / APEGA licence",
+      detail: "Roughly 6 years of experience incl. 2 under an Alberta P.Eng. Regulation is moving to APEGA (expected 2027) — confirm the rules when I get there." },
+
+    // ---- Oil & gas ----
+    { track: "oilgas", state: "active", target: 2026, since: "2026-09", title: "Junior Design Drafter — Insight Analytical Solutions",
+      detail: "Started September 2026, drafting process analyzer systems.", evidence: "Current role" },
+    { track: "oilgas", state: "done", target: 2026, title: "Analyzer Toolkit v3.4",
+      detail: "Probe insertion, tolerance stack-up, wake frequency, and CAD export for sample taps.", evidence: "Software project" },
+    { track: "oilgas", state: "todo", target: 2027, title: "Core field tickets",
+      detail: "H2S Alive and Standard First Aid on top of CSTS 2020, WHMIS, and TDG." },
+    { track: "oilgas", state: "todo", target: 2027, title: "Hazardous locations",
+      detail: "CEC Section 18 — Class/Zone classification and equipment marking on drawings." },
+    { track: "oilgas", state: "todo", target: 2027, title: "Analyzer sample systems",
+      detail: "Sample conditioning, transport lag, and shelter layout — and the toolkit's lag-time tool." },
+    { track: "oilgas", state: "todo", target: 2028, title: "Safety Instrumented Systems — IEC 61511",
+      detail: "SIS fundamentals: SIF, SIL, and how safety loops show up in design documents." },
+    { track: "oilgas", state: "todo", target: 2029, title: "Industrial cybersecurity — IEC 62443",
+      detail: "Builds on SCADA, DNP3, and IEC 61850 work from SAIT." },
+    { track: "oilgas", state: "todo", target: 2030, title: "Intermediate designer / instrumentation technologist",
+      detail: "Own analyzer system packages end to end." },
+
+    // ---- Automotive ----
+    { track: "automotive", state: "done", target: 2024, title: "SolidWorks foundation",
+      detail: "3D modeling from mechanical engineering at U of C — where the automotive interest started.", evidence: "U of C coursework" },
+    { track: "automotive", state: "todo", target: 2027, title: "Vehicle electrical architecture",
+      detail: "Wiring harnesses, fusing, grounding, and 12 V distribution — protection fundamentals at vehicle scale." },
+    { track: "automotive", state: "todo", target: 2027, title: "Vehicle networks — CAN bus project",
+      detail: "Read and log real CAN traffic; the same packet-level thinking as GOOSE and DNP3." },
+    { track: "automotive", state: "todo", target: 2028, title: "EV powertrain — BMS & motor control",
+      detail: "Battery management and motor control logic — an extension of relay, PLC, and VFD work." },
+    { track: "automotive", state: "todo", target: 2029, title: "Functional safety — ISO 26262",
+      detail: "The automotive sibling of IEC 61511." },
+    { track: "automotive", state: "todo", target: 2030, title: "Component design in SolidWorks",
+      detail: "Model a real vehicle component against structural and packaging constraints." },
+    { track: "automotive", state: "todo", target: 2031, title: "Sensors & ADAS integration",
+      detail: "Detect → decide → act: protection-relay logic applied to driver-assist sensors." },
+
+    // ---- Bridge (both industries) ----
+    { track: "bridge", state: "done", target: 2026, title: "Controls & protection foundation",
+      detail: "PLC/HMI, SEL relays, IEC 61850 GOOSE, DNP3 — verified in the lab.", evidence: "SAIT + capstone" },
+    { track: "bridge", state: "active", target: 2027, title: "Drafting: AutoCAD → Revit",
+      detail: "AutoCAD Electrical is solid; adding Revit for BIM-based design." },
+    { track: "bridge", state: "active", target: 2027, title: "Engineering software",
+      detail: "Analyzer Toolkit today; the same approach applies to vehicle electrical calcs.", evidence: "Analyzer Toolkit" },
+    { track: "bridge", state: "todo", target: 2028, title: "Functional safety — IEC 61508",
+      detail: "The parent standard behind IEC 61511 (plants) and ISO 26262 (vehicles) — one study, both tracks." }
   ],
 
   /* ---------------- CERTIFICATIONS & EDUCATION ----------------
