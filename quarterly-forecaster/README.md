@@ -128,3 +128,31 @@ XAUUSD volume is broker tick volume, so VWAP depends on the data vendor; compare
 **Alerts.** Create one alert on the strategy with *alert() function calls only* and your webhook
 URL. Put the secret in the strategy's *Webhook secret* input; it's visible to anyone you share
 the script with, so keep the script private. Only entries send alerts.
+
+## Order execution (OANDA v20, practice by default)
+
+`src/forecaster/execution.py` turns **TAKE** verdicts into OANDA market orders, with the
+stop-loss and take-profit attached on fill. CAUTION and SKIP are logged and never sent.
+Alerts need a `stop` (the Pine strategy now sends `stop` and `target`); without one there's no order.
+
+- **Practice only by default.** Live needs `OANDA_ENVIRONMENT=live` *and* `LIVE_TRADING=true`
+  written in `.env`, read from the file itself, so a shell export doesn't count. Asking for live
+  without the flag stops the server at startup.
+- **Opt-in even on practice:** `EXECUTION_ENABLED=true`.
+- **Hard limits:**
+  - risk per trade, with a hard ceiling of 2%
+  - max position units, counting what's already held
+  - max open trades
+  - max daily loss (NAV change since 17:00 New York)
+  - alert age, and how far the alert price may be from OANDA's live price
+  - duplicate alerts are never re-sent
+- **Kill switch:** `python -m forecaster.execution --kill [--flatten]` creates `data/KILL_SWITCH`
+  and blocks all orders until `--resume --yes`. It also trips by itself after 3 consecutive API
+  errors, or if a position is found above `MAX_POSITION_UNITS`.
+- `python -m forecaster.execution --status` shows the environment, limits, kill switch, account
+  and recent order decisions. Every decision, including blocked ones and why, is in the
+  `orders` table of `data/alerts.sqlite`, and is sent to Telegram.
+
+Start the webhook server as before. With `EXECUTION_ENABLED=true` it routes TAKE verdicts here.
+Run on practice for a good while and check `--status`, the `orders` table and
+`webhook_server --stats` before considering anything else.

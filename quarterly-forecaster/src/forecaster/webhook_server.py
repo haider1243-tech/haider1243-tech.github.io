@@ -97,6 +97,8 @@ class Alert(BaseModel):
     side: Literal["long", "short"]
     time: str | None = None
     secret: str = Field(min_length=1, max_length=512)
+    stop: float | None = None      # optional: needed for execution (forecaster.execution)
+    target: float | None = None
 
     @field_validator("side", mode="before")
     @classmethod
@@ -116,6 +118,20 @@ class Alert(BaseModel):
     def _positive(cls, v: float) -> float:
         if not v > 0 or v != v:
             raise ValueError("price must be a positive number")
+        return v
+
+    @field_validator("stop", "target", mode="before")
+    @classmethod
+    def _optional_price(cls, v: Any) -> Any:
+        if v is None or (isinstance(v, str) and v.strip() in ("", "na", "NaN")):
+            return None
+        return v.replace(",", "").strip() if isinstance(v, str) else v
+
+    @field_validator("stop", "target")
+    @classmethod
+    def _optional_positive(cls, v: float | None) -> float | None:
+        if v is not None and (not v > 0 or v != v):
+            raise ValueError("stop/target must be positive numbers")
         return v
 
     @property
@@ -583,7 +599,9 @@ def create_app(settings: Settings | None = None, store: AlertStore | None = None
                ctx: Context | None = None, notifier: TelegramNotifier | None = None,
                cfg: RuleConfig = RuleConfig(), clock: Callable[[], pd.Timestamp] | None = None,
                price_fetcher: PriceFetcher | None = None, resolve_every_s: float | None = 300.0,
-               trust_proxy: bool = False) -> FastAPI:
+               trust_proxy: bool = False, executor: Any = None) -> FastAPI:
+    """`executor`: optional forecaster.execution.Executor. It gets every new alert and
+    places an order only for TAKE verdicts that pass its own hard limits."""
     settings = settings or load_settings()
     store = store or AlertStore(Path(settings.cache_dir) / "alerts.sqlite")
     ctx = ctx or Context(settings)
@@ -667,6 +685,10 @@ def create_app(settings: Settings | None = None, store: AlertStore | None = None
             return {"id": alert_id, "duplicate": True, "verdict": prev["verdict"],
                     "reasons": json.loads(prev["reasons"])}
         background.add_task(notify, alert_id, format_message(alert, t, verdict, reasons, checks))
+        if executor is not None:
+            from forecaster.execution import request_from_alert
+
+            background.add_task(executor.handle, request_from_alert(alert_id, alert, t, verdict))
         return {"id": alert_id, "duplicate": False, "verdict": verdict, "reasons": reasons,
                 "checks": [asdict(c) for c in checks]}
 
@@ -696,7 +718,17 @@ def main(argv: list[str] | None = None) -> int:  # pragma: no cover
         return 0
     import uvicorn
 
-    uvicorn.run(create_app(settings, store, trust_proxy=args.trust_proxy), host=args.host, port=args.port)
+    from forecaster.execution import Executor, OrderStore, load_execution_config
+
+    xcfg = load_execution_config()          # raises if live is requested without LIVE_TRADING=true in .env
+    executor = None
+    if xcfg.enabled:
+        notifier = TelegramNotifier(settings.telegram_bot_token, settings.telegram_chat_id)
+        executor = Executor(xcfg, OrderStore(Path(settings.cache_dir) / "alerts.sqlite"),
+                            notify=lambda text: notifier.send(html.escape(text)))
+        log.warning("order execution ENABLED on OANDA %s", xcfg.environment.upper())
+    uvicorn.run(create_app(settings, store, trust_proxy=args.trust_proxy, executor=executor),
+                host=args.host, port=args.port)
     return 0
 
 

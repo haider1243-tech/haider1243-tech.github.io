@@ -63,7 +63,7 @@ def test_pine_script_has_required_parts():
     assert src.startswith("//@version=6")
     for needle in ('request.economic("US", cpiField', 'request.economic("US", ppiField',
                    "request.security(dxySym", "request.security(yldSym", "ta.atr(atrLen)",
-                   "strategy.exit(", "alert(f_json(\"long\")", "alert(f_json(\"short\")",
+                   "strategy.exit(", "alert(f_json(\"long\", close - stopDist", "alert(f_json(\"short\", close + stopDist",
                    "riskPct / 100.0 / (stopDist * syminfo.pointvalue)", "process_orders_on_close = false",
                    "immediately = true", '"DXY up"', '"US10Y up"', '"Econ release"'):
         assert needle in src, needle
@@ -75,12 +75,13 @@ def test_pine_alert_json_matches_webhook_format():
     """Rebuild the Pine f_json message in Python and validate it with the server's model."""
     line = next(l for l in PINE.read_text().splitlines() if l.strip().startswith("'{\"ticker\""))
     keys = re.findall(r'"(\w+)":"', line)
-    assert keys == ["ticker", "price", "strategy", "side", "time", "secret"]
+    assert keys == ["ticker", "price", "strategy", "side", "time", "stop", "target", "secret"]
     msg = ('{"ticker":"' + "XAUUSD" + '","price":"' + "2650.43" + '","strategy":"' + "vwap_gold"
            + '","side":"' + "long" + '","time":"' + "2026-11-09" + "T" + "14:15:00" + "Z"
-           + '","secret":"' + "abc" + '"}')
+           + '","stop":"' + "2641.10" + '","target":"' + "2669.10" + '","secret":"' + "abc" + '"}')
     a = Alert.model_validate_json(msg)
     assert (a.ticker, a.price, a.side, a.time) == ("XAUUSD", 2650.43, "long", "2026-11-09T14:15:00Z")
+    assert (a.stop, a.target) == (2641.10, 2669.10)
 
 
 # --------------------------------------------------------------------------- #

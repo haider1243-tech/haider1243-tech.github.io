@@ -45,6 +45,7 @@ src/forecaster/
   dashboard.py     # Plotly figure builders (palette-validated, light/dark)
   webhook_server.py # FastAPI: TradingView alert -> risk checks -> TAKE/CAUTION/SKIP -> Telegram + SQLite
   vwap_backtest.py # bar-for-bar Python port of pine/vwap_gold.pine (TV broker-emulator rules)
+  execution.py     # OANDA v20 orders for TAKE verdicts only; practice default; hard limits + kill switch
   model.py         # Forecast contract + block-bootstrap baseline model
   cli.py           # `python -m forecaster`
   sources/         # one adapter per data provider
@@ -144,6 +145,15 @@ data/              # API response cache — contents never committed
   `request.economic()` can't block *before* a release; pre-event blocking
   needs the explicit event list. pandas 3 infers datetime resolution: always
   `.as_unit("ns")` before `.asi8` (a unit mismatch once blocked 99% of bars).
+- **Execution safety** (`execution.py`), never weaken without the user asking:
+  live requires `OANDA_ENVIRONMENT=live` AND `LIVE_TRADING=true` read from the
+  `.env` *file* (`dotenv_values`), never from `os.environ`. Live without the flag
+  raises at config load (fail closed). Orders only for verdict TAKE, only with
+  `EXECUTION_ENABLED=true`, only with a stop. Hard ceilings are in code
+  (`HARD_MAX_RISK_PCT`, `HARD_MAX_POSITION_UNITS`). Any API error or unexpected
+  response blocks the order; 3 in a row trip the kill switch. Tests use
+  `httpx.MockTransport`; never hit OANDA in tests. The token goes in the
+  Authorization header only and is never logged or stored.
 - **Injectable I/O**: sources accept a `session` / `downloader` argument so
   tests pass fakes. `load_settings` accepts an `env` dict. Keep it this way.
 - **Tests**: every new module gets a test file. Tests must not touch the network
@@ -178,6 +188,8 @@ python -m forecaster.webhook_server --port 8000   # TradingView webhook (expose 
 python -m forecaster.webhook_server --stats       # outcome stats by verdict
 python -m forecaster.vwap_backtest --pine-events --fred-events   # event list for the Pine input
 python -m forecaster.vwap_backtest XAUUSD_15.csv --compare tv_trades.csv   # port vs Strategy Tester
+python -m forecaster.execution --status          # OANDA env, limits, kill switch, recent orders
+python -m forecaster.execution --kill --flatten  # stop all orders and close positions
 ```
 
 (Run from this folder with `PYTHONPATH=src`, or `pip install -e .`.)

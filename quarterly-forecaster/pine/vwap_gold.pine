@@ -23,7 +23,8 @@
 //
 // Alerts: create ONE alert on this strategy with condition "alert() function calls only" and
 // your webhook URL. Messages use the webhook server's format:
-//   {"ticker":"XAUUSD","price":"2650.40","strategy":"vwap_gold","side":"long","time":"...Z","secret":"..."}
+//   {"ticker":"XAUUSD","price":"2650.40","strategy":"vwap_gold","side":"long","time":"...Z",
+//    "stop":"2641.10","target":"2669.00","secret":"..."}   (stop/target: extra fields, used for execution)
 // Only entries send alerts (the server treats every alert as a new long/short signal).
 
 strategy("VWAP Gold", shorttitle = "VWAP Gold", overlay = true,
@@ -179,9 +180,10 @@ bool shortSig = allowShort and (shortLose or shortReject) and close > dn2 and ma
 // ---------------------------------------------------------------- alerts (webhook server format)
 f_clean(string s) =>
     str.replace_all(str.replace_all(s, '"', ""), "\\", "")
-f_json(string side) =>
+// "stop"/"target" are extra fields the webhook accepts; forecaster.execution needs the stop to size orders.
+f_json(string side, float stopPx, float targetPx) =>
     string ts = str.format_time(time_close, "yyyy-MM-dd", "UTC") + "T" + str.format_time(time_close, "HH:mm:ss", "UTC") + "Z"
-    '{"ticker":"' + syminfo.ticker + '","price":"' + str.tostring(close, format.mintick) + '","strategy":"' + f_clean(whStrategy) + '","side":"' + side + '","time":"' + ts + '","secret":"' + f_clean(whSecret) + '"}'
+    '{"ticker":"' + syminfo.ticker + '","price":"' + str.tostring(close, format.mintick) + '","strategy":"' + f_clean(whStrategy) + '","side":"' + side + '","time":"' + ts + '","stop":"' + str.tostring(stopPx, format.mintick) + '","target":"' + str.tostring(targetPx, format.mintick) + '","secret":"' + f_clean(whSecret) + '"}'
 
 // ---------------------------------------------------------------- orders
 if strategy.position_size != 0 and flatWin
@@ -198,12 +200,12 @@ if strategy.position_size == 0 and (longSig or shortSig)
             strategy.entry("L", strategy.long, qty = qty, comment = longReclaim ? "L reclaim" : "L reject")
             strategy.exit("XL", from_entry = "L", stop = close - stopDist, limit = close + stopDist * tpR)
             if whSecret != ""
-                alert(f_json("long"), alert.freq_once_per_bar_close)
+                alert(f_json("long", close - stopDist, close + stopDist * tpR), alert.freq_once_per_bar_close)
         else
             strategy.entry("S", strategy.short, qty = qty, comment = shortLose ? "S loss" : "S reject")
             strategy.exit("XS", from_entry = "S", stop = close + stopDist, limit = close - stopDist * tpR)
             if whSecret != ""
-                alert(f_json("short"), alert.freq_once_per_bar_close)
+                alert(f_json("short", close + stopDist, close - stopDist * tpR), alert.freq_once_per_bar_close)
 
 // ---------------------------------------------------------------- plots
 plot(newSess ? na : vwap, "VWAP", color.new(#eb6834, 0), 2, plot.style_linebr)
