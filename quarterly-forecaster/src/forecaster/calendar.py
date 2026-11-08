@@ -35,7 +35,7 @@ from typing import Callable, Iterable, Literal
 
 import pandas as pd
 
-from forecaster.config import HORIZON_QUARTERS
+from forecaster.config import HORIZON_QUARTERS, is_equity_symbol
 from forecaster.sources.finnhub import FinnhubClient
 from forecaster.sources.fred import FredClient
 
@@ -140,11 +140,6 @@ def earnings_impact(ticker: str) -> Impact:
     return "medium" if ticker.upper() in MEGA_CAPS else "low"
 
 
-def _has_earnings(ticker: str) -> bool:
-    # Indices (^GSPC), futures (GC=F) and FX/index symbols (DX-Y.NYB) don't report.
-    return not (ticker.startswith("^") or "=" in ticker or ticker.endswith(".NYB"))
-
-
 def earnings_events(
     finnhub: FinnhubClient,
     tickers: Iterable[str],
@@ -154,7 +149,7 @@ def earnings_events(
 ) -> list[Event]:
     out = []
     for t in tickers:
-        if not _has_earnings(t):
+        if not is_equity_symbol(t):
             continue
         try:
             rows = finnhub.earnings_calendar(t, start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d"))

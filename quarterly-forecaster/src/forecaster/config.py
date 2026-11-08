@@ -25,6 +25,12 @@ class Settings:
     tickers: tuple[str, ...] = field(default=CORE_TICKERS)
 
 
+def is_equity_symbol(ticker: str) -> bool:
+    """False for indices (^GSPC), futures (GC=F) and ICE index symbols (DX-Y.NYB),
+    which have no earnings or company news."""
+    return not (ticker.startswith("^") or "=" in ticker or ticker.endswith(".NYB"))
+
+
 def load_watchlist(path: Path) -> list[str]:
     """Read extra tickers from a watchlist YAML file. Missing file -> []."""
     if not path.exists():

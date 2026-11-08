@@ -24,6 +24,8 @@ Probabilistic forecasts of index/ETF prices **4 quarters ahead**.
 | FRED | Macro series + scheduled release dates | `FRED_API_KEY` | `sources/fred.py` → `macro.py`, `calendar.py` |
 | Finnhub (free tier, ~60 req/min) | Quotes, fundamentals, earnings calendar | `FINNHUB_API_KEY` | `sources/finnhub.py` → `calendar.py` |
 | Hardcoded | FOMC decision dates 2026–2027 | none | `calendar.py` |
+| Finnhub `company-news` + `news?category=general` | Headlines per ticker + market | `FINNHUB_API_KEY` | `news.py` |
+| FinBERT (`ProsusAI/finbert`, local) | Headline sentiment | none (`requirements-ml.txt`) | `news.py` |
 
 Only add a paid source if a free one genuinely can't provide the data.
 
@@ -36,6 +38,7 @@ src/forecaster/
   market_data.py   # OHLCV universe, parquet cache, weekly/quarterly resampling, metrics
   macro.py         # FRED indicators: YoY, 3-month trend, surprise vs prior trend
   calendar.py      # CPI/PPI/jobs/GDP/FOMC/earnings events, impact tags, risk density per quarter
+  news.py          # headlines -> FinBERT sentiment -> daily/weekly index + shock flags
   model.py         # Forecast contract + block-bootstrap baseline model
   cli.py           # `python -m forecaster`
   sources/         # one adapter per data provider
@@ -73,6 +76,15 @@ data/              # API response cache — contents never committed
   **Update `FOMC_DECISION_DATES` each year** when the Fed publishes the next
   schedule (federalreserve.gov/monetarypolicy/fomccalendars.htm). Run as
   `python -m forecaster.calendar`, never by file path (shadows stdlib `calendar`).
+- **News** (`news.py`): headlines, tags and scores live in `data/news.sqlite`.
+  Scores are keyed by sha256(model + headline text), so a headline is scored
+  once ever, even when it shows up under another id or ticker. Macro topics are
+  regex-tagged on market news only (the free tier has no keyword search).
+  Sentiment = P(pos) − P(neg). Shock = |z| > 2 against the prior 30 news days,
+  with at least 3 headlines; expect about 5% false alarms on quiet noise. The free
+  market-news endpoint returns only the latest ~100 items, so market history
+  builds up only by running regularly. Tests use a fake scorer; never load the
+  real model in tests.
 - **Injectable I/O**: sources accept a `session` / `downloader` argument so
   tests pass fakes. `load_settings` accepts an `env` dict. Keep it this way.
 - **Tests**: every new module gets a test file. Tests must not touch the network
@@ -89,6 +101,7 @@ data/              # API response cache — contents never committed
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
+pip install torch --index-url https://download.pytorch.org/whl/cpu && pip install -r requirements-ml.txt  # only for news.py
 cp .env.example .env      # then add your keys
 pytest
 python -m forecaster      # forecast core + watchlist
@@ -96,6 +109,7 @@ python -m forecaster AAPL MSFT --clear-cache
 python -m forecaster.market_data   # refresh OHLCV cache, print metrics snapshot + correlations
 python -m forecaster.macro         # macro indicator snapshot (needs FRED_API_KEY)
 python -m forecaster.calendar      # upcoming events + risk density per quarter
+python -m forecaster.news          # collect + score headlines, print latest index and shocks
 ```
 
 (Run from this folder with `PYTHONPATH=src`, or `pip install -e .`.)

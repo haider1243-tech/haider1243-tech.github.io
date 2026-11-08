@@ -52,3 +52,11 @@ class FinnhubClient:
         """Upcoming/recent earnings for `symbol` between ISO dates start..end."""
         data = self._get("calendar/earnings", symbol=symbol, **{"from": start, "to": end})
         return (data or {}).get("earningsCalendar") or []
+
+    def company_news(self, symbol: str, start: str, end: str) -> list[dict]:
+        """Company headlines between ISO dates (free tier: ~1 year back, N. America)."""
+        return self._get("company-news", symbol=symbol, **{"from": start, "to": end}) or []
+
+    def market_news(self, category: str = "general") -> list[dict]:
+        """Latest market-wide headlines (no date range or keyword search on free tier)."""
+        return self._get("news", category=category) or []

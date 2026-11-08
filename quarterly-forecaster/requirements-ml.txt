@@ -1,0 +1,8 @@
+# Optional: local FinBERT sentiment for forecaster.news (~1-2 GB with torch).
+# CPU-only torch is much smaller than the default CUDA build:
+#   pip install torch --index-url https://download.pytorch.org/whl/cpu
+#   pip install -r requirements-ml.txt
+# The model (ProsusAI/finbert, ~440 MB) downloads from huggingface.co on first use.
+-r requirements.txt
+torch>=2.2
+transformers>=4.40
