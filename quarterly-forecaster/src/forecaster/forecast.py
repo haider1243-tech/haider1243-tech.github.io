@@ -140,6 +140,8 @@ class PointInTimeData:
     sentiment: pd.Series | None = None       # daily market sentiment (news.daily_index)
     risk_points: pd.Series | None = None     # PeriodIndex[Q] -> scheduled-release points
     ticker: str = ""
+    currency: str | None = None              # "CAD", or None for index points / yields
+    converted_from: str | None = None        # "USD" if prices were converted to CAD
 
     def asof(self, t: pd.Timestamp) -> "PointInTimeData":
         """Everything an investor could have known at the close of day t."""
@@ -155,6 +157,8 @@ class PointInTimeData:
             sentiment=None if self.sentiment is None else self.sentiment[self.sentiment.index < t],
             risk_points=rp,
             ticker=self.ticker,
+            currency=self.currency,
+            converted_from=self.converted_from,
         )
 
 
@@ -664,9 +668,17 @@ def load_data(ticker: str, settings, on_warn=print) -> PointInTimeData:  # pragm
     from forecaster.news import MARKET_TAG, NewsStore, daily_index
     from forecaster.sources.fred import FredClient
 
+    from forecaster.config import load_currency_overrides
+    from forecaster.market_data import close_in_cad, ticker_currency, usd_cad_rates
+
     store = ParquetStore(settings.cache_dir / "ohlcv")
-    close = store.get(ticker)["Close"]
-    vix = store.get("^VIX")["Close"]
+    overrides = load_currency_overrides()
+    fx_fred = None
+    if settings.fred_api_key:
+        fx_fred = FredClient(settings.fred_api_key, Cache(settings.cache_dir, settings.cache_ttl_hours * 3600))
+    rates = usd_cad_rates(store, fx_fred, on_warn=on_warn) if ticker_currency(ticker, overrides) == "USD" else None
+    close = close_in_cad(store, ticker, rates, overrides)   # model runs on CAD prices: FX risk included
+    vix = store.get("^VIX")["Close"]                       # index points: not converted
     try:
         tnx = store.get("^TNX")["Close"]
     except Exception as exc:
@@ -699,7 +711,8 @@ def load_data(ticker: str, settings, on_warn=print) -> PointInTimeData:  # pragm
         di = daily_index(NewsStore(news_db).scored_frame())
         if MARKET_TAG in di.index.get_level_values("tag"):
             sentiment = di.loc[MARKET_TAG]["sentiment"]
-    return PointInTimeData(close, vix, tnx, macro, sentiment, risk, ticker)
+    return PointInTimeData(close, vix, tnx, macro, sentiment, risk, ticker,
+                           currency=close.attrs.get("currency"), converted_from=close.attrs.get("converted_from"))
 
 
 def main(argv: list[str] | None = None) -> int:  # pragma: no cover

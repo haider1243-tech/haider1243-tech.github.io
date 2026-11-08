@@ -9,6 +9,16 @@ See [CLAUDE.md](CLAUDE.md) for goals, design rules and every command.
 > See [results/backtest_sp500_2005_2022.md](results/backtest_sp500_2005_2022.md).
 > The dashboard shows this on every page.
 
+## Currency: everything in CAD
+
+Money values are reported in CAD. Canadian tickers (`XIU.TO`, `XEQT.TO`, `VFV.TO`, `ZAG.TO`
+in `watchlist.yaml`) are already in CAD. USD-priced tickers (SPY, QQQ, ^GSPC, ^IXIC, gold,
+sector ETFs) are converted with the daily USD/CAD rate (Yahoo `CAD=X`, back-filled from FRED
+`DEXCAUS` for older history) *before* forecasting, so their ranges include currency risk, as a
+Canadian holder would experience it. ^VIX, ^TNX and the dollar index aren't money and stay in
+points or percent. Trading prices for orders (e.g. XAU_USD on OANDA) stay in their quote
+currency, with the CAD equivalent shown next to them.
+
 ## Setup
 
 ```bash

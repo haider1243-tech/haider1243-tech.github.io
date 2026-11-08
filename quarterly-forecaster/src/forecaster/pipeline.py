@@ -90,8 +90,14 @@ def _now() -> str:
 # Pure builders
 # --------------------------------------------------------------------------- #
 
-def ticker_snapshot(result, prices: pd.Series, top_n: int = 10, history_years: int = 2) -> dict:
-    """Forecast snapshot from an EnsembleResult (forecast.ensemble_forecast)."""
+def ticker_snapshot(result, prices: pd.Series, top_n: int = 10, history_years: int = 2,
+                    currency: str | None = "CAD", converted_from: str | None = None) -> dict:
+    """Forecast snapshot from an EnsembleResult (forecast.ensemble_forecast).
+
+    `currency` is the unit of every price in the snapshot ("CAD", or None for
+    index points / yields such as ^VIX); `converted_from` is "USD" when the
+    prices were converted with daily USD/CAD before forecasting.
+    """
     fc = result.forecast
     t = result.table
     hist = prices.dropna().loc[result.as_of - pd.DateOffset(years=history_years): result.as_of]
@@ -105,6 +111,8 @@ def ticker_snapshot(result, prices: pd.Series, top_n: int = 10, history_years: i
         "version": SNAPSHOT_VERSION,
         "kind": "ticker",
         "ticker": fc.ticker,
+        "currency": currency,
+        "converted_from": converted_from,
         "generated_at": _now(),
         "as_of": result.as_of,
         "last_close": fc.last_close,
@@ -241,7 +249,8 @@ def refresh_ticker(settings: Settings, ticker: str, warn: Warn = print) -> dict:
     from forecaster.forecast import ensemble_forecast, load_data
 
     data = load_data(ticker, settings, on_warn=warn)
-    snap = ticker_snapshot(ensemble_forecast(data), data.prices)
+    snap = ticker_snapshot(ensemble_forecast(data), data.prices,
+                           currency=data.currency, converted_from=data.converted_from)
     write_json(snapshot_dir(settings) / f"ticker_{safe_name(ticker)}.json", snap)
     return snap
 

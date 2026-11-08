@@ -56,10 +56,11 @@ def test_forecast_page(app):
     txt = _text(at)
     assert "SYN: 4-quarter forecast range" in txt
     assert "Ranges, not predictions" in txt
+    assert "C$" in txt and "(CAD)" in txt and "Priced in CAD" in txt     # every price shown in CAD
     assert len(at.dataframe) >= 1
     tbl = at.dataframe[0].value
     assert list(tbl["Quarter"]) == ["2021Q3", "2021Q4", "2022Q1", "2022Q2"]
-    assert (tbl["P10"] < tbl["P50"]).all() and (tbl["P50"] < tbl["P90"]).all()
+    assert (tbl["P10 (CAD)"] < tbl["P50 (CAD)"]).all() and (tbl["P50 (CAD)"] < tbl["P90 (CAD)"]).all()
     assert "Price data ends" in txt      # fixture as-of is 2021 -> staleness warning
     # SHAP selectors work
     at.selectbox(key="shap_level").set_value(0.1).run()

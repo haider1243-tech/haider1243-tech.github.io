@@ -517,6 +517,33 @@ def summarize(trades: pd.DataFrame, equity: pd.Series, initial: float) -> dict:
     }
 
 
+def cad_view(trades: pd.DataFrame, equity: pd.Series, usd_cad: pd.Series, initial_usd: float) -> dict:
+    """P&L in CAD: each trade converted at the USD/CAD rate of its exit date,
+    the equity curve at each bar's date. The USD stats stay the reference for
+    comparing with TradingView; this is the CAD report."""
+    from forecaster.market_data import rate_on_dates
+
+    if trades.empty:
+        return {"net_profit_cad": 0.0, "trades": trades.assign(pnl_cad=[])}
+    t = trades.copy()
+    fx_exit = rate_on_dates(usd_cad, pd.DatetimeIndex(t["exit_time"]))
+    t["usd_cad"] = fx_exit.to_numpy()
+    t["pnl_cad"] = t["pnl"] * t["usd_cad"]
+    eq_cad = equity * rate_on_dates(usd_cad, equity.index).to_numpy()
+    start = float(eq_cad.dropna().iloc[0]) if eq_cad.notna().any() else float("nan")
+    dd_abs, dd_pct = _max_dd(eq_cad.dropna().to_numpy())
+    wins, losses = t.loc[t["pnl_cad"] > 0, "pnl_cad"], t.loc[t["pnl_cad"] <= 0, "pnl_cad"]
+    return {
+        "net_profit_cad": float(t["pnl_cad"].sum()),
+        "start_equity_cad": start,
+        "end_equity_cad": float(eq_cad.dropna().iloc[-1]) if eq_cad.notna().any() else float("nan"),
+        "gross_profit_cad": float(wins.sum()), "gross_loss_cad": float(losses.sum()),
+        "max_drawdown_cad": dd_abs, "max_drawdown_cad_pct": dd_pct,
+        "unconverted_trades": int(t["usd_cad"].isna().sum()),
+        "trades": t,
+    }
+
+
 # --------------------------------------------------------------------------- #
 # Comparison with TradingView's "List of trades" export
 # --------------------------------------------------------------------------- #
@@ -619,6 +646,7 @@ def main(argv: list[str] | None = None) -> int:  # pragma: no cover
     ap.add_argument("--compare", help="TradingView 'List of trades' CSV to compare against")
     ap.add_argument("--tv-tz", default="UTC", help="timezone of dates in the List of trades export")
     ap.add_argument("--params", help="JSON of VwapParams overrides, e.g. '{\"slippage_ticks\": 20}'")
+    ap.add_argument("--usdcad-csv", help="USD/CAD daily CSV (time + close); default: cached CAD=X")
     ap.add_argument("--out", help="write trades CSV + stats JSON with this prefix")
     args = ap.parse_args(argv)
 
@@ -651,7 +679,29 @@ def main(argv: list[str] | None = None) -> int:  # pragma: no cover
     if params.use_macro and "dxy_up" not in bars and not args.dxy_csv:
         print("[warn] macro filter on but no DXY data: every entry is blocked. Export the 'DXY up'/'US10Y up' "
               "plots, pass --dxy-csv/--us10y-csv, or set use_macro false.", file=sys.stderr)
+    print("Results in the instrument's quote currency (USD for XAUUSD), matching TradingView's Strategy Tester:")
     print(format_stats(run.stats))
+    fx = None
+    if args.usdcad_csv:
+        fx = load_tradingview_csv(args.usdcad_csv)["close"]
+        fx.index = fx.index.tz_convert(None).normalize()
+    else:
+        from forecaster.config import load_settings
+        from forecaster.market_data import USD_CAD_SYMBOL, ParquetStore
+
+        cached = ParquetStore(load_settings().cache_dir / "ohlcv").read(USD_CAD_SYMBOL)
+        fx = None if cached is None else cached["Close"]
+    if fx is not None and len(run.trades):
+        c = cad_view(run.trades, run.equity, fx, params.initial_capital)
+        print(f"\nIn CAD (each trade at its exit-date USD/CAD): net {c['net_profit_cad']:,.2f} CAD, "
+              f"equity C${c['start_equity_cad']:,.2f} -> C${c['end_equity_cad']:,.2f}, "
+              f"max drawdown C${c['max_drawdown_cad']:,.2f} ({c['max_drawdown_cad_pct']:.1%})"
+              + (f"; {c['unconverted_trades']} trades before the first rate" if c["unconverted_trades"] else ""))
+        if args.out:
+            c["trades"].to_csv(f"{args.out}_trades_cad.csv", index=False)
+    else:
+        print("\n[warn] no USD/CAD rates (run python -m forecaster.market_data or pass --usdcad-csv): "
+              "CAD report skipped", file=sys.stderr)
     if run.open_trade:
         print(f"open trade (not in stats): {run.open_trade['side']} since {run.open_trade['entry_time']}")
     if args.compare:

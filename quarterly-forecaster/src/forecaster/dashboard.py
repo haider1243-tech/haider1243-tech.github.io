@@ -67,6 +67,23 @@ def label(feature: str) -> str:
     return FEATURE_LABELS.get(feature, feature)
 
 
+def unit(snap: dict) -> str:
+    """Unit of the snapshot's prices: 'CAD', or 'index points' for VIX-like series."""
+    return snap.get("currency") or "index points"
+
+
+def money(v: float, snap: dict, decimals: int = 2) -> str:
+    return f"C${v:,.{decimals}f}" if snap.get("currency") == "CAD" else f"{v:,.{decimals}f}"
+
+
+def currency_note(snap: dict) -> str:
+    if snap.get("converted_from") == "USD":
+        return "USD prices converted to CAD at the daily USD/CAD rate (Yahoo CAD=X), before forecasting, so the range includes currency risk."
+    if snap.get("currency") == "CAD":
+        return "Priced in CAD."
+    return "Index points: not a currency amount, so not converted."
+
+
 # --------------------------------------------------------------------------- #
 # Forecast
 # --------------------------------------------------------------------------- #
@@ -80,34 +97,36 @@ def fan_chart(snap: dict, pal: dict, height: int = 440) -> go.Figure:
     x = [as_of] + list(pd.to_datetime(fc["target_date"]))
     p10, p50, p90 = ([last] + list(fc[c]) for c in ("p10", "p50", "p90"))
     q = [""] + list(fc["quarter"])
+    cad = snap.get("currency") == "CAD"
+    pre = "C$" if cad else ""
 
     fig = go.Figure()
     if not hist.empty:
         fig.add_trace(go.Scatter(
             x=pd.to_datetime(hist["date"]), y=hist["close"], name="Weekly close",
             mode="lines", line=dict(color=pal["s1"], width=2),
-            hovertemplate="%{y:,.2f}<extra>Close</extra>"))
+            hovertemplate=pre + "%{y:,.2f}<extra>Close</extra>"))
     # band: upper edge first, lower edge fills up to it
     fig.add_trace(go.Scatter(x=x, y=p90, mode="lines", line=dict(color=_rgba(pal["s1"], 0.45), width=1),
                              name="P90", showlegend=False, customdata=q,
-                             hovertemplate="P90 %{y:,.2f}<extra>%{customdata}</extra>"))
+                             hovertemplate="P90 " + pre + "%{y:,.2f}<extra>%{customdata}</extra>"))
     fig.add_trace(go.Scatter(x=x, y=p10, mode="lines", line=dict(color=_rgba(pal["s1"], 0.45), width=1),
                              fill="tonexty", fillcolor=_rgba(pal["s1"], 0.12), name="P10–P90 range",
-                             customdata=q, hovertemplate="P10 %{y:,.2f}<extra>%{customdata}</extra>"))
+                             customdata=q, hovertemplate="P10 " + pre + "%{y:,.2f}<extra>%{customdata}</extra>"))
     fig.add_trace(go.Scatter(x=x, y=p50, mode="lines+markers", name="Median (P50)",
                              line=dict(color=pal["s1"], width=2, dash="dash"),
                              marker=dict(size=8, color=pal["s1"]), customdata=q,
-                             hovertemplate="P50 %{y:,.2f}<extra>%{customdata}</extra>"))
+                             hovertemplate="P50 " + pre + "%{y:,.2f}<extra>%{customdata}</extra>"))
     fig.add_vline(x=as_of, line=dict(color=pal["muted"], width=1, dash="dot"))
     fig.add_annotation(x=as_of, y=1, yref="paper", text=f"Forecast from {as_of:%b %d, %Y}",
                        showarrow=False, xanchor="right", yanchor="top", xshift=-6,
                        font=dict(color=pal["muted"], size=12))
     for name, ys in (("P90", p90), ("P50", p50), ("P10", p10)):
-        fig.add_annotation(x=x[-1], y=ys[-1], text=f"{name} {ys[-1]:,.0f}", showarrow=False,
+        fig.add_annotation(x=x[-1], y=ys[-1], text=f"{name} {pre}{ys[-1]:,.0f}", showarrow=False,
                            xanchor="left", xshift=8, font=dict(color=pal["ink2"], size=12))
     fig.update_layout(hovermode="x unified")
-    _layout(fig, pal, height, y_format=",.0f")
-    fig.update_layout(margin=dict(r=96))  # room for the P10/P50/P90 end labels
+    _layout(fig, pal, height, y_format=",.0f", y_title=f"Price ({unit(snap)})")
+    fig.update_layout(margin=dict(r=110))  # room for the P10/P50/P90 end labels
     fig.update_xaxes(range=[x[0] - pd.DateOffset(years=2) if hist.empty else pd.to_datetime(hist["date"]).min(),
                             x[-1] + pd.DateOffset(days=120)])
     return fig
@@ -115,12 +134,13 @@ def fan_chart(snap: dict, pal: dict, height: int = 440) -> go.Figure:
 
 def forecast_table(snap: dict) -> pd.DataFrame:
     last = float(snap["last_close"])
+    u = "CAD" if snap.get("currency") == "CAD" else "pts"
     rows = []
     for f in snap["forecast"]:
         rows.append({
             "Quarter": f["quarter"],
             "Target date": pd.Timestamp(f["target_date"]).date(),
-            "P10": f["p10"], "P50": f["p50"], "P90": f["p90"],
+            f"P10 ({u})": f["p10"], f"P50 ({u})": f["p50"], f"P90 ({u})": f["p90"],
             "P10 %": f["p10"] / last - 1, "P50 %": f["p50"] / last - 1, "P90 %": f["p90"] / last - 1,
             "P(>10% drawdown by then)": f["prob_drawdown"],
         })

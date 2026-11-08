@@ -3,7 +3,7 @@
  "kind": "backtest",
  "ticker": "^GSPC",
  "generated_at": "2026-11-08T09:48:02+00:00",
- "note": "Reference run: S&P 500 price index + VIX, 2005-2022, price/VIX features only (no macro, rates or news). See results/backtest_sp500_2005_2022.md.",
+ "note": "Reference run: S&P 500 price index + VIX, 2005-2022, price/VIX features only (no macro, rates or news). See results/backtest_sp500_2005_2022.md. Computed on USD prices, before the switch to CAD reporting. Coverage and skill are unit-free, but a CAD run includes currency risk and can score differently.",
  "first_origin": "2004-12-31T00:00:00",
  "first_target": "2005-03-31T00:00:00",
  "last_target": "2022-09-30T00:00:00",

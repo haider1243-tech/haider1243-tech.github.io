@@ -181,8 +181,9 @@ def page_forecast(t: str) -> None:
         return
     as_of = pd.Timestamp(snap["as_of"])
     st.subheader(f"{t}: 4-quarter forecast range")
-    st.caption(f"As of {as_of:%b %d, %Y} · last close {snap['last_close']:,.2f} · {snap['model']} · "
-               f"generated {age_text(snap['generated_at'])}")
+    st.caption(f"As of {as_of:%b %d, %Y} · last close {viz.money(snap['last_close'], snap)} "
+               f"({viz.unit(snap)}) · {snap['model']} · generated {age_text(snap['generated_at'])}  \n"
+               f"{viz.currency_note(snap)}")
     if (pd.Timestamp.today() - as_of).days > 10:
         st.warning(f"Price data ends {as_of:%b %d, %Y}; refresh for an up-to-date forecast.", icon="⚠️")
 
@@ -191,7 +192,7 @@ def page_forecast(t: str) -> None:
     st.dataframe(
         tbl, hide_index=True, use_container_width=True,
         column_config={
-            **{c: st.column_config.NumberColumn(c, format="%.2f") for c in ("P10", "P50", "P90")},
+            **{c: st.column_config.NumberColumn(c, format="%.2f") for c in tbl.columns if c[:3] in ("P10", "P50", "P90") and "%" not in c},
             **{c: st.column_config.NumberColumn(c, format="percent") for c in ("P10 %", "P50 %", "P90 %")},
             "P(>10% drawdown by then)": st.column_config.ProgressColumn(
                 "P(>10% drawdown by then)", min_value=0.0, max_value=1.0, format="percent"),

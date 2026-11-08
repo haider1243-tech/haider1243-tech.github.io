@@ -68,7 +68,20 @@ data/              # API response cache — contents never committed
   downloads when the newest bar is older than the last completed business day,
   fetches incrementally, and throttles rechecks (holidays) via `_meta.json`.
 - **Market universe**: watchlist + core + `SPY, QQQ, ^VIX, ^TNX, DX-Y.NYB, GC=F`
-  + sector ETFs `XLK, XLF, XLE, XLV, XLY` (`market_data.market_universe`).
+  + sector ETFs `XLK, XLF, XLE, XLV, XLY` + `CAD=X` (`market_data.market_universe`).
+  The watchlist holds the Canadian ETFs `XIU.TO, XEQT.TO, VFV.TO, ZAG.TO`.
+- **Currency: every money value is reported in CAD.** `ticker_currency()`:
+  `.TO/.V/.NE/.CN` -> CAD (no conversion); `^VIX, ^TNX, DX-Y.NYB, CAD=X` ->
+  not money (points / yields, never converted); everything else -> USD,
+  converted with daily USD/CAD (Yahoo `CAD=X`, CAD per USD, back-filled from
+  FRED `DEXCAUS` before 2003). Rates align point-in-time (last rate on or before
+  each bar, never a later one); bars before the first rate are dropped.
+  `validate_usd_cad` refuses rate series outside 1.0-2.0 (inverted = silent
+  1.9x error). Forecasts are made on CAD prices, so P10-P90 includes FX risk;
+  never convert a USD forecast at spot. Exceptions, on purpose: order prices
+  and the VWAP backtest's primary stats stay in the instrument's quote currency
+  (XAU_USD is USD; needed to match TradingView and OANDA), with CAD shown
+  alongside. Overrides: `currencies:` map in watchlist.yaml.
 - **Metric conventions** (`market_data.py`): log returns for vol/beta/corr;
   simple returns for quarterly returns; realized vol annualized with 252 days;
   drawdowns are negative fractions; RSI is Wilder's 14-day (SMA-seeded); always

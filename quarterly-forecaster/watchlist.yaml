@@ -1,7 +1,17 @@
 # Extra tickers to forecast in addition to the core set
-# (SPY, QQQ, ^GSPC, ^IXIC, ^VIX are always included).
-# Use Yahoo Finance symbols.
+# (SPY, QQQ, ^GSPC, ^IXIC, ^VIX are always included). Use Yahoo Finance symbols.
+#
+# All money values are reported in CAD. Currency is inferred:
+#   *.TO / *.V / *.NE / *.CN  -> CAD (no conversion)
+#   ^VIX, ^TNX, DX-Y.NYB ...  -> not money (left as points / percent)
+#   everything else           -> USD, converted with daily USD/CAD (CAD=X)
 tickers:
-  # - AAPL
-  # - MSFT
-  # - XIU.TO
+  - XIU.TO     # iShares S&P/TSX 60
+  - XEQT.TO    # iShares Core Equity ETF Portfolio (launched Aug 2019: short history)
+  - VFV.TO     # Vanguard S&P 500 Index ETF (CAD, unhedged)
+  - ZAG.TO     # BMO Aggregate Bond Index ETF
+
+# Optional: override the inferred currency (USD / CAD / none).
+currencies: {}
+#  BTC-USD: USD
+#  ^GSPTSE: none

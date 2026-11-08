@@ -40,14 +40,122 @@ MACRO_TICKERS: tuple[str, ...] = (
     "GC=F",       # gold futures
 )
 SECTOR_ETFS: tuple[str, ...] = ("XLK", "XLF", "XLE", "XLV", "XLY")
+CANADIAN_ETFS: tuple[str, ...] = ("XIU.TO", "XEQT.TO", "VFV.TO", "ZAG.TO")
+
+# --------------------------------------------------------------------------- #
+# Currency: every money value is reported in CAD
+# --------------------------------------------------------------------------- #
+BASE_CURRENCY = "CAD"
+USD_CAD_SYMBOL = "CAD=X"          # Yahoo: CAD per 1 USD (~1.35)
+FRED_USD_CAD = "DEXCAUS"          # FRED daily noon rate, CAD per 1 USD, since 1971
+CAD_SUFFIXES = (".TO", ".V", ".NE", ".CN")
+# Not money: volatility, yields, the dollar index and the FX rate itself stay as-is.
+NON_MONETARY: frozenset[str] = frozenset({"^VIX", "^VVIX", "^TNX", "^IRX", "^FVX", "^TYX",
+                                          "DX-Y.NYB", USD_CAD_SYMBOL})
+USD_CAD_RANGE = (1.0, 2.0)        # sanity band: anything outside is inverted or broken
+
+
+def ticker_currency(ticker: str, overrides: dict[str, str] | None = None) -> str | None:
+    """'CAD', 'USD', or None for non-monetary series (index points, yields)."""
+    t = ticker.upper()
+    if overrides and t in overrides:
+        v = overrides[t]
+        return None if v in (None, "", "none", "NONE") else v.upper()
+    if t in NON_MONETARY:
+        return None
+    if t.endswith(CAD_SUFFIXES):
+        return "CAD"
+    return "USD"
+
+
+def validate_usd_cad(rates: pd.Series) -> pd.Series:
+    r = rates.dropna().sort_index()
+    if r.empty:
+        raise ValueError("no USD/CAD rates")
+    med = float(r.median())
+    if not (USD_CAD_RANGE[0] <= med <= USD_CAD_RANGE[1]):
+        raise ValueError(f"USD/CAD median {med:.4f} outside {USD_CAD_RANGE}: series looks inverted "
+                         "(CAD/USD) or isn't USD/CAD at all; refusing to convert")
+    if (r <= 0).any():
+        raise ValueError("USD/CAD contains non-positive rates")
+    return r
+
+
+def usd_cad_rates(store: "ParquetStore", fred=None,
+                  on_warn: Callable[[str], None] | None = None) -> pd.Series:
+    """Daily USD/CAD (CAD per USD) from Yahoo CAD=X, back-filled before its first
+    date with FRED DEXCAUS when a FRED client is given. Date index, tz-naive."""
+    yahoo = store.get(USD_CAD_SYMBOL)["Close"]
+    yahoo.index = pd.DatetimeIndex(yahoo.index).normalize()
+    rates = yahoo
+    if fred is not None:
+        try:
+            older = fred.get_series(FRED_USD_CAD)
+            older = older[older.index < yahoo.index.min()]
+            rates = pd.concat([older, yahoo])
+        except Exception as exc:  # FRED is only a back-fill; Yahoo alone still works
+            if on_warn:
+                on_warn(f"DEXCAUS back-fill failed, USD/CAD starts {yahoo.index.min():%Y-%m-%d}: {exc}")
+    rates = rates[~rates.index.duplicated(keep="last")]
+    return validate_usd_cad(rates).rename("usd_cad")
+
+
+def rate_on_dates(rates: pd.Series, dates: pd.DatetimeIndex) -> pd.Series:
+    """Rate for each date = last known rate on or before that date (never a later one)."""
+    r = validate_usd_cad(rates)
+    d = pd.DatetimeIndex(dates)
+    key = d.tz_convert(None) if d.tz is not None else d
+    pos = r.index.searchsorted(key.normalize(), side="right") - 1
+    vals = np.where(pos >= 0, r.to_numpy()[np.clip(pos, 0, None)], np.nan)
+    return pd.Series(vals, index=dates, name="usd_cad")
+
+
+def to_cad(df: pd.DataFrame, ticker: str, rates: pd.Series | None,
+           overrides: dict[str, str] | None = None) -> pd.DataFrame:
+    """Convert a USD OHLCV frame (or a Close-only frame) to CAD with daily USD/CAD.
+
+    CAD and non-monetary tickers come back unchanged. Bars before the first
+    available rate are dropped rather than guessed. Volume is not converted.
+    The result carries attrs: currency, converted_from.
+    """
+    cur = ticker_currency(ticker, overrides)
+    out = df.copy()
+    if cur is None:
+        out.attrs.update(currency=None, converted_from=None)
+        return out
+    if cur == BASE_CURRENCY:
+        out.attrs.update(currency=BASE_CURRENCY, converted_from=None)
+        return out
+    if cur != "USD":
+        raise ValueError(f"{ticker}: no conversion from {cur} to {BASE_CURRENCY}")
+    if rates is None:
+        raise ValueError(f"{ticker} is priced in USD and no USD/CAD rates are available")
+    fx = rate_on_dates(rates, out.index)
+    keep = fx.notna().to_numpy()
+    out = out[keep]
+    fx = fx[keep]
+    for c in ("Open", "High", "Low", "Close", "open", "high", "low", "close"):
+        if c in out:
+            out[c] = out[c] * fx.to_numpy()
+    out.attrs.update(currency=BASE_CURRENCY, converted_from="USD")
+    return out
+
+
+def close_in_cad(store: "ParquetStore", ticker: str, rates: pd.Series | None,
+                 overrides: dict[str, str] | None = None) -> pd.Series:
+    """Daily close in CAD (or unconverted for non-monetary tickers)."""
+    df = to_cad(store.get(ticker)[["Close"]], ticker, rates, overrides)
+    s = df["Close"].rename(ticker)
+    s.attrs.update(df.attrs)
+    return s
 
 # Downloader(ticker, start) -> daily OHLCV DataFrame. start=None means full history.
 Downloader = Callable[[str, "pd.Timestamp | None"], pd.DataFrame]
 
 
 def market_universe(watchlist: tuple[str, ...] | list[str] = ()) -> tuple[str, ...]:
-    """Watchlist (incl. core tickers) + macro tickers + sector ETFs, de-duplicated."""
-    return merge_tickers(tuple(watchlist), [*MACRO_TICKERS, *SECTOR_ETFS])
+    """Watchlist (incl. core tickers) + macro tickers + sector ETFs + USD/CAD, de-duplicated."""
+    return merge_tickers(tuple(watchlist), [*MACRO_TICKERS, *SECTOR_ETFS, USD_CAD_SYMBOL])
 
 
 # --------------------------------------------------------------------------- #
@@ -174,12 +282,18 @@ def fetch_universe(
     tickers: tuple[str, ...] | list[str],
     store: ParquetStore,
     on_error: Callable[[str, Exception], None] | None = None,
+    rates: pd.Series | None = None,
+    overrides: dict[str, str] | None = None,
 ) -> dict[str, pd.DataFrame]:
-    """Fetch all tickers; failures are reported via `on_error` and skipped."""
+    """Fetch all tickers; failures are reported via `on_error` and skipped.
+
+    With `rates` (USD/CAD), USD-priced frames are converted to CAD (to_cad).
+    """
     out: dict[str, pd.DataFrame] = {}
     for t in tickers:
         try:
-            out[t] = store.get(t)
+            df = store.get(t)
+            out[t] = df if rates is None else to_cad(df, t, rates, overrides)
         except Exception as exc:
             if on_error is None:
                 raise
@@ -382,6 +496,7 @@ def compute_metrics(
         snap_rows.append(
             {
                 "ticker": t,
+                "currency": frames[t].attrs.get("currency", ticker_currency(t)) or "index/yield",
                 "as_of": c.index[-1],
                 "close": c.iloc[-1],
                 "ma50": trend["ma50"],
@@ -404,16 +519,31 @@ def main() -> int:  # pragma: no cover - thin wrapper around network I/O
 
     from forecaster.config import load_settings
 
+    from forecaster.config import load_currency_overrides
+
     settings = load_settings()
     store = ParquetStore(settings.cache_dir / "ohlcv")
+    warn = lambda m: print(f"[warn] {m}", file=sys.stderr)  # noqa: E731
+    fred = None
+    if settings.fred_api_key:
+        from forecaster.cache import Cache
+        from forecaster.sources.fred import FredClient
+
+        fred = FredClient(settings.fred_api_key, Cache(settings.cache_dir, settings.cache_ttl_hours * 3600))
+    rates = usd_cad_rates(store, fred, on_warn=warn)
     frames = fetch_universe(
         market_universe(settings.tickers),
         store,
-        on_error=lambda t, e: print(f"[warn] {t}: {e}", file=sys.stderr),
+        on_error=lambda t, e: warn(f"{t}: {e}"),
+        rates=rates,
+        overrides=load_currency_overrides(),
     )
     if not frames:
         return 1
     m = compute_metrics(frames)
+    print(f"Prices in {BASE_CURRENCY}; USD converted at daily USD/CAD "
+          f"(last {rates.iloc[-1]:.4f} on {rates.index[-1]:%Y-%m-%d}). Returns, vol, beta and "
+          f"correlations include the currency effect. Index/yield series are not converted.")
     with pd.option_context("display.width", 200, "display.max_columns", 20):
         print(m.snapshot.round(3))
         print()

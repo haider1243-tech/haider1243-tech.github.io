@@ -8,7 +8,8 @@ import sys
 import pandas as pd
 
 from forecaster.cache import Cache
-from forecaster.config import load_settings
+from forecaster.config import load_currency_overrides, load_settings
+from forecaster.market_data import BASE_CURRENCY, USD_CAD_SYMBOL, ticker_currency, to_cad
 from forecaster.model import block_bootstrap_forecast
 from forecaster.sources.prices import get_daily_closes, to_quarterly
 
@@ -24,17 +25,31 @@ def main(argv: list[str] | None = None) -> int:
     if args.clear_cache:
         print(f"Cleared {cache.clear()} cached responses")
 
+    overrides = load_currency_overrides()
+    rates: list = []  # lazily fetched USD/CAD
+
+    def in_cad(ticker: str, closes: pd.Series) -> tuple[pd.Series, str]:
+        cur = ticker_currency(ticker, overrides)
+        if cur != "USD":
+            return closes, cur or "points"
+        if not rates:
+            rates.append(get_daily_closes(USD_CAD_SYMBOL, cache))
+        return to_cad(closes.to_frame("Close"), ticker, rates[0])["Close"], BASE_CURRENCY
+
     frames, failed = [], []
     for ticker in args.tickers or settings.tickers:
         try:
-            quarterly = to_quarterly(get_daily_closes(ticker, cache))
-            frames.append(block_bootstrap_forecast(ticker, quarterly).to_frame())
+            closes, unit = in_cad(ticker, get_daily_closes(ticker, cache))
+            quarterly = to_quarterly(closes)
+            frames.append(block_bootstrap_forecast(ticker, quarterly).to_frame().assign(unit=unit))
         except Exception as exc:  # keep going for other tickers
             failed.append(ticker)
             print(f"[warn] {ticker}: {exc}", file=sys.stderr)
 
     if frames:
         out = pd.concat(frames, ignore_index=True)
+        print(f"Prices in {BASE_CURRENCY} (USD tickers converted at daily USD/CAD, {USD_CAD_SYMBOL}); "
+              "index/yield series in points.")
         print(out.to_string(index=False, float_format=lambda x: f"{x:,.2f}"))
     return 1 if failed and not frames else 0
 

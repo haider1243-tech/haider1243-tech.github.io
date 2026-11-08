@@ -314,10 +314,12 @@ def decide(checks: list[Check], cfg: RuleConfig) -> tuple[str, list[str]]:
 
 class Context:
     def __init__(self, settings: Settings,
-                 vix_loader: Callable[[], pd.Series | None] | None = None) -> None:
+                 vix_loader: Callable[[], pd.Series | None] | None = None,
+                 fx_loader: Callable[[], float | None] | None = None) -> None:
         self.settings = settings
         self.snap_dir = Path(settings.cache_dir) / "snapshots"
         self._vix_loader = vix_loader or self._cached_vix
+        self._fx_loader = fx_loader
 
     def ticker_snapshot(self, ticker: str) -> tuple[dict | None, str, bool]:
         s = read_json(self.snap_dir / f"ticker_{safe_name(ticker)}.json")
@@ -334,6 +336,18 @@ class Context:
 
     def vix(self) -> pd.Series | None:
         return self._vix_loader()
+
+    def usd_cad(self) -> float | None:
+        """Latest cached USD/CAD (CAD per USD), or None. Local file only."""
+        if self._fx_loader is not None:
+            return self._fx_loader()
+        try:
+            from forecaster.market_data import USD_CAD_SYMBOL, ParquetStore, validate_usd_cad
+
+            df = ParquetStore(Path(self.settings.cache_dir) / "ohlcv").read(USD_CAD_SYMBOL)
+            return None if df is None else float(validate_usd_cad(df["Close"]).iloc[-1])
+        except Exception:
+            return None
 
     def _cached_vix(self) -> pd.Series | None:
         from forecaster.market_data import ParquetStore
@@ -572,9 +586,29 @@ class TelegramNotifier:
 ICONS = {"TAKE": "✅", "CAUTION": "⚠️", "SKIP": "⛔"}
 
 
-def format_message(alert: Alert, t: pd.Timestamp, verdict: str, reasons: list[str], checks: list[Check]) -> str:
+def price_text(symbol: str, price: float, usd_cad: float | None) -> str:
+    """Instrument price in its own currency, plus the CAD equivalent for USD instruments.
+
+    Orders stay in the instrument's quote currency (XAU_USD is priced in USD), so
+    the native price is never replaced, only annotated.
+    """
+    from forecaster.market_data import ticker_currency
+
+    cur = ticker_currency(symbol)
+    if cur == "CAD":
+        return f"C${price:,.2f}"
+    if cur is None:
+        return f"{price:,.2f} pts"
+    if usd_cad:
+        return f"{price:,.2f} USD (≈ C${price * usd_cad:,.2f})"
+    return f"{price:,.2f} USD (no USD/CAD rate cached)"
+
+
+def format_message(alert: Alert, t: pd.Timestamp, verdict: str, reasons: list[str], checks: list[Check],
+                   usd_cad: float | None = None) -> str:
     e = html.escape
-    lines = [f"{ICONS[verdict]} <b>{verdict}</b>: {e(alert.side.upper())} {e(alert.ticker)} @ {alert.price:,.2f}",
+    lines = [f"{ICONS[verdict]} <b>{verdict}</b>: {e(alert.side.upper())} {e(alert.ticker)} @ "
+             f"{e(price_text(alert.symbol, alert.price, usd_cad))}",
              f"<i>{e(alert.strategy)}</i> · {t:%Y-%m-%d %H:%M} UTC", ""]
     for c in checks:
         mark = {"ok": "•", "caution": "⚠️", "skip": "⛔", "unknown": "❔"}[c.level]
@@ -684,7 +718,7 @@ def create_app(settings: Settings | None = None, store: AlertStore | None = None
             prev = store.get(alert_id)
             return {"id": alert_id, "duplicate": True, "verdict": prev["verdict"],
                     "reasons": json.loads(prev["reasons"])}
-        background.add_task(notify, alert_id, format_message(alert, t, verdict, reasons, checks))
+        background.add_task(notify, alert_id, format_message(alert, t, verdict, reasons, checks, ctx.usd_cad()))
         if executor is not None:
             from forecaster.execution import request_from_alert
 

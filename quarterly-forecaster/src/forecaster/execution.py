@@ -526,7 +526,16 @@ def main(argv: list[str] | None = None) -> int:  # pragma: no cover
           f"max daily loss {cfg.max_daily_loss:,.2f}, max open trades {cfg.max_open_trades}")
     if cfg.token and cfg.account_id:
         a = ex.client.summary()
-        print(f"account     : NAV {float(a['NAV']):,.2f} {a.get('currency', '')}, open trades {a.get('openTradeCount')}")
+        nav, ccy = float(a["NAV"]), a.get("currency", "")
+        cad = ""
+        if ccy == "USD":
+            from forecaster.config import load_settings
+            from forecaster.market_data import USD_CAD_SYMBOL, ParquetStore
+
+            fx = ParquetStore(load_settings().cache_dir / "ohlcv").read(USD_CAD_SYMBOL)
+            cad = f" (≈ C${nav * float(fx['Close'].iloc[-1]):,.2f})" if fx is not None else " (no USD/CAD cached)"
+        print(f"account     : NAV {nav:,.2f} {ccy}{cad}, open trades {a.get('openTradeCount')}")
+        print("              limits (MAX_DAILY_LOSS) are in the account currency")
         for p in ex.client.open_positions():
             print(f"position    : {p['instrument']} long {p['long']['units']} short {p['short']['units']}")
     o = store.orders().tail(10)

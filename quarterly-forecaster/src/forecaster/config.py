@@ -47,6 +47,18 @@ def load_watchlist(path: Path) -> list[str]:
     return [str(t).strip().upper() for t in raw if t and str(t).strip()]
 
 
+def load_currency_overrides(path: Path | None = None) -> dict[str, str]:
+    """Optional `currencies:` map in watchlist.yaml, e.g. {"BTC-USD": "USD", "^GSPTSE": "none"}."""
+    path = path or PROJECT_ROOT / "watchlist.yaml"
+    if not path.exists():
+        return {}
+    data = yaml.safe_load(path.read_text()) or {}
+    raw = data.get("currencies") or {}
+    if not isinstance(raw, dict):
+        raise ValueError(f"{path}: 'currencies' must be a mapping")
+    return {str(k).upper(): ("none" if v is None else str(v)) for k, v in raw.items()}
+
+
 def merge_tickers(core: tuple[str, ...], extra: list[str]) -> tuple[str, ...]:
     """Core tickers first, then watchlist additions, de-duplicated in order."""
     seen: dict[str, None] = {}
