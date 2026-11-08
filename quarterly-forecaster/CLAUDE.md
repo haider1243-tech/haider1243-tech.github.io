@@ -11,14 +11,16 @@ Probabilistic forecasts of index/ETF prices **4 quarters ahead**.
    The `Forecast` / `QuarterRange` dataclasses in `src/forecaster/model.py`
    enforce this (4 quarters, `p10 <= p50 <= p90`); every model must return them.
 3. **Testable and cached** — every module is unit-testable without the network,
-   and every external API call goes through `forecaster.cache.Cache` to stay
-   within free-tier rate limits.
+   and every external API call is cached to stay within free-tier rate limits
+   (`forecaster.cache.Cache` for API responses, `market_data.ParquetStore` for
+   daily OHLCV).
 
 ## Data sources (free first)
 
 | Source | Use | Key | Module |
 |---|---|---|---|
-| yfinance | Daily/quarterly prices | none | `sources/prices.py` |
+| yfinance | Daily OHLCV for the market universe (parquet cache) | none | `market_data.py` |
+| yfinance | Daily/quarterly closes for the baseline model | none | `sources/prices.py` |
 | FRED | Rates, CPI, unemployment, yield curve | `FRED_API_KEY` | `sources/fred.py` |
 | Finnhub (free tier, ~60 req/min) | Quotes, fundamentals | `FINNHUB_API_KEY` | `sources/finnhub.py` |
 
@@ -30,6 +32,7 @@ Only add a paid source if a free one genuinely can't provide the data.
 src/forecaster/
   config.py        # .env + watchlist.yaml -> Settings; core tickers, horizon, percentiles
   cache.py         # file cache with TTL in /data (gitignored)
+  market_data.py   # OHLCV universe, parquet cache, weekly/quarterly resampling, metrics
   model.py         # Forecast contract + block-bootstrap baseline model
   cli.py           # `python -m forecaster`
   sources/         # one adapter per data provider
@@ -44,6 +47,16 @@ data/              # API response cache — contents never committed
   rather than URLs where the API allows it (Finnhub does).
 - **Caching**: new source functions take a `Cache` and use
   `cache.get_or_fetch(Cache.make_key(...), fetch)`. No uncached network calls.
+  Daily OHLCV goes through `ParquetStore` (`data/ohlcv/*.parquet`): it only
+  downloads when the newest bar is older than the last completed business day,
+  fetches incrementally, and throttles rechecks (holidays) via `_meta.json`.
+- **Market universe**: watchlist + core + `SPY, QQQ, ^VIX, ^TNX, DX-Y.NYB, GC=F`
+  + sector ETFs `XLK, XLF, XLE, XLV, XLY` (`market_data.market_universe`).
+- **Metric conventions** (`market_data.py`): log returns for vol/beta/corr;
+  simple returns for quarterly returns; realized vol annualized with 252 days;
+  drawdowns are negative fractions; RSI is Wilder's 14-day (SMA-seeded); always
+  align prices on common dates *before* taking returns (calendars differ for
+  futures/FX/indices).
 - **Injectable I/O**: sources accept a `session` / `downloader` argument so
   tests pass fakes. `load_settings` accepts an `env` dict. Keep it this way.
 - **Tests**: every new module gets a test file. Tests must not touch the network
@@ -64,6 +77,7 @@ cp .env.example .env      # then add your keys
 pytest
 python -m forecaster      # forecast core + watchlist
 python -m forecaster AAPL MSFT --clear-cache
+python -m forecaster.market_data   # refresh OHLCV cache, print metrics snapshot + correlations
 ```
 
 (Run from this folder with `PYTHONPATH=src`, or `pip install -e .`.)
