@@ -144,13 +144,19 @@ python -m forecaster.backtest SPY --out results/spy   # walk-forward 2005-now (~
 
 - `^VIX` is mean-reverting; bootstrapping its log returns ignores that. Give it
   a dedicated model.
-- Ensemble weights are fixed (50/50), not calibrated. Build a walk-forward
-  backtest (`ensemble_forecast(data, asof=T)` for past T) that scores 10–90
-  coverage and pinball loss vs the bootstrap baseline, and sets weights from it.
+- **Backtest verdict (results/backtest_sp500_2005_2022.md, price+VIX only):
+  the ensemble does NOT reliably beat the naive baseline.** Pinball skill is
+  +4%, but the 90% CI includes 0. The median is worse than the historical
+  average. LightGBM alone is overconfident (60% coverage). MC alone is too
+  bearish after selloffs. The drawdown probabilities say 90% when the realised
+  rate is about 40%. Fixes, in order: (1) shrink regime drifts and the P50
+  toward the historical drift; (2) conformalise or regularise the LightGBM
+  quantiles; (3) recalibrate drawdown probabilities on past origins only;
+  (4) learn blend weights in a *nested* walk-forward (past origins only); (5)
+  rerun with macro/rates features (needs FRED), which matters most for 2022.
 - LightGBM has few *independent* samples (targets overlap by up to 4
   quarters); on synthetic data it gives pure-noise features non-zero SHAP.
   Needs stronger regularisation / feature pruning, validated by the backtest.
 - News sentiment only exists from when collection started; it's NaN for most
   training rows until history accumulates.
 - `GDP` is nominal; consider `GDPC1` (real GDP) for growth signals.
-- Add a backtest module that scores historical forecast calibration.

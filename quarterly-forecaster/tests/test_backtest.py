@@ -229,4 +229,9 @@ def test_evaluate_end_to_end(bt):
     assert 0 <= rep.overall.loc["model", "coverage"] <= 1
     assert any("never: no scored forecasts" in v for v in rep.verdict)
     md = rep.to_markdown()
-    assert "## Verdict" in md and "Pinball skill" in md
+    assert "## Verdict" in md and "Pinball skill" in md and "## Components" in md
+    assert set(rep.components.index) == {"blend", "monte_carlo", "lightgbm", "baseline"}
+    # blend quantiles are the sorted 50/50 average of the components
+    s = res.scored.dropna(subset=["lgb_q50"])
+    np.testing.assert_allclose(s["m_q50"], np.sort(0.5 * s[["mc_q10", "mc_q50", "mc_q90"]].to_numpy()
+                                                   + 0.5 * s[["lgb_q10", "lgb_q50", "lgb_q90"]].to_numpy(), axis=1)[:, 1])

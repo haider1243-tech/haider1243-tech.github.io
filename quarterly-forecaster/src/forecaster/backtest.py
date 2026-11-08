@@ -178,6 +178,11 @@ def run_backtest(
                 "dd_event": float(dd < -cfg.drawdown_threshold) if np.isfinite(dd) else np.nan,
                 "m_q10": m["blend_q10"], "m_q50": m["blend_q50"], "m_q90": m["blend_q90"],
                 "m_dd": m["prob_drawdown"],
+                # components, scored separately so you can see what helps
+                "mc_q10": m["mc_q10"], "mc_q50": m["mc_q50"], "mc_q90": m["mc_q90"],
+                "mc_dd": m["prob_drawdown"],
+                "lgb_q10": m["lgb_q10"], "lgb_q50": m["lgb_q50"], "lgb_q90": m["lgb_q90"],
+                "lgb_dd": np.nan,
                 "b_q10": b[0], "b_q50": b[1], "b_q90": b[2],
                 "b_dd": baseline_drawdown_prob(hist, n, cfg.drawdown_threshold),
                 "w_lgb": res.weights["lgb"], "n_train": res.n_train_rows,
@@ -244,6 +249,7 @@ class Report:
     overall: pd.DataFrame        # rows: model/baseline, cols: metrics
     by_horizon: pd.DataFrame     # MultiIndex (horizon, model)
     stress: pd.DataFrame         # MultiIndex (window, model) + crash details
+    components: pd.DataFrame     # blend / monte_carlo / lightgbm / baseline
     skill: float
     diff_ci: tuple[float, float] # 90% CI of mean (model - baseline) pinball per origin
     verdict: list[str]
@@ -259,6 +265,7 @@ class Report:
                  f"[{self.diff_ci[0]:+.5f}, {self.diff_ci[1]:+.5f}]", "",
                  "## Verdict", "", *[f"- {v}" for v in self.verdict], "",
                  "## Overall", "", fmt(self.overall), "",
+                 "## Components (rows where LightGBM was active)", "", fmt(self.components), "",
                  "## By horizon (quarters ahead)", "", fmt(self.by_horizon), "",
                  "## Stress periods (rows whose target falls in the window)", "", fmt(self.stress), ""]
         return "\n".join(lines)
@@ -266,6 +273,15 @@ class Report:
 
 def _two(rows: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame({"model": score(rows, "m"), "baseline": score(rows, "b")}).T
+
+
+def component_scores(rows: pd.DataFrame) -> pd.DataFrame:
+    """Blend vs Monte Carlo alone vs LightGBM alone vs baseline, on the rows
+    where every component produced a forecast."""
+    cols = [c for c in ("m", "mc", "lgb", "b") if f"{c}_q50" in rows]
+    r = rows.dropna(subset=["y", *(f"{c}_q50" for c in cols)])
+    names = {"m": "blend", "mc": "monte_carlo", "lgb": "lightgbm", "b": "baseline"}
+    return pd.DataFrame({names[c]: score(r, c) for c in cols}).T
 
 
 def _verdict(overall: pd.DataFrame, skill: float, ci: tuple[float, float],
@@ -331,7 +347,7 @@ def evaluate(result: BacktestResult, windows: dict[str, tuple[str, str]] = STRES
         if len(rows) else float("nan")
     d = per_origin_loss_diff(rows)
     ci = block_bootstrap_ci(d.to_numpy(), cfg.n_boot, cfg.block, seed=cfg.seed)
-    return Report(overall, by_h, stress, float(skill), ci, _verdict(overall, skill, ci, stress),
+    return Report(overall, by_h, stress, component_scores(rows), float(skill), ci, _verdict(overall, skill, ci, stress),
                   int(rows["origin"].nunique()) if len(rows) else 0, len(result.skipped))
 
 
