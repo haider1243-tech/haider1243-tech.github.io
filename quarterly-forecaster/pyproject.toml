@@ -1,0 +1,17 @@
+[project]
+name = "quarterly-forecaster"
+version = "0.1.0"
+description = "Probabilistic 4-quarter-ahead forecasts for major US indices and a custom watchlist."
+requires-python = ">=3.10"
+
+[tool.pytest.ini_options]
+pythonpath = ["src", "tests"]
+testpaths = ["tests"]
+addopts = "-q"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]

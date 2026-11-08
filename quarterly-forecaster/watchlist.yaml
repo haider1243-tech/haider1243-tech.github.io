@@ -1,0 +1,7 @@
+# Extra tickers to forecast in addition to the core set
+# (SPY, QQQ, ^GSPC, ^IXIC, ^VIX are always included).
+# Use Yahoo Finance symbols.
+tickers:
+  # - AAPL
+  # - MSFT
+  # - XIU.TO

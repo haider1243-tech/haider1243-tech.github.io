@@ -1,0 +1,10 @@
+# Runtime
+yfinance>=0.2.40
+pandas>=2.2
+numpy>=1.26
+requests>=2.31
+python-dotenv>=1.0
+PyYAML>=6.0
+
+# Dev / test
+pytest>=8.0
