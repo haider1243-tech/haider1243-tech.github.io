@@ -54,3 +54,32 @@ crontab -e
 with "Start in" set to the project folder.
 
 The computer must be on at that time; cron doesn't catch up on missed runs.
+
+## TradingView webhook → Telegram
+
+`src/forecaster/webhook_server.py` receives TradingView alerts, runs risk checks
+(regime, high-impact events in the next 24 h, news-sentiment shocks, VIX), and
+returns **TAKE / CAUTION / SKIP** with reasons. It sends the verdict to Telegram and
+logs every alert plus its actual +1h / +4h / +1d outcome to `data/alerts.sqlite`.
+These are risk filters, not a trading signal.
+
+1. In `.env` set `WEBHOOK_SECRET` (a long random string), `TELEGRAM_BOT_TOKEN` (from
+   @BotFather) and `TELEGRAM_CHAT_ID` (send your bot a message, then open
+   `https://api.telegram.org/bot<TOKEN>/getUpdates`).
+2. Run the server and keep it running:
+   `python -m forecaster.webhook_server --port 8000`
+3. Expose it over HTTPS. TradingView only posts to ports 80/443, e.g.
+   `cloudflared tunnel --url http://localhost:8000`, or a reverse proxy with TLS.
+   Behind a proxy, add `--trust-proxy` if you use `WEBHOOK_ALLOWED_IPS`.
+4. TradingView alert → Notifications → Webhook URL `https://<host>/tv-alert`, with this message:
+   ```json
+   {"ticker":"{{ticker}}","price":"{{close}}","strategy":"vwap_gold","side":"long","time":"{{timenow}}","secret":"<WEBHOOK_SECRET>"}
+   ```
+5. Keep the dashboard snapshots fresh (`python -m forecaster.pipeline`, or the weekly job).
+   The checks read them. VIX comes from the OHLCV cache, so also refresh it daily
+   (`python -m forecaster.market_data`), or the VIX check will report stale data.
+
+The server fills in outcomes every 5 minutes while it runs. If it isn't always on,
+schedule `python -m forecaster.webhook_server --resolve-outcomes` hourly; yfinance
+keeps 5-minute bars for about 60 days. See how verdicts performed with
+`python -m forecaster.webhook_server --stats`.

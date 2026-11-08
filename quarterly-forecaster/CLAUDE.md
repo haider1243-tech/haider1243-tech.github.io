@@ -43,6 +43,7 @@ src/forecaster/
   backtest.py      # walk-forward backtest vs naive baseline, calibration + stress periods
   pipeline.py      # runs models, writes JSON snapshots the dashboard reads
   dashboard.py     # Plotly figure builders (palette-validated, light/dark)
+  webhook_server.py # FastAPI: TradingView alert -> risk checks -> TAKE/CAUTION/SKIP -> Telegram + SQLite
   model.py         # Forecast contract + block-bootstrap baseline model
   cli.py           # `python -m forecaster`
   sources/         # one adapter per data provider
@@ -120,6 +121,18 @@ data/              # API response cache — contents never committed
   reference is shown and labelled as such. Never show a P50 without its band.
   Charts follow the dataviz palette (validated light + dark). Accent colour is
   blue (`.streamlit/config.toml`), so red keeps its meaning.
+- **Webhook** (`webhook_server.py`): fails closed (no `WEBHOOK_SECRET` -> 503),
+  compares the secret in constant time, and never stores or logs it. It parses
+  JSON from the raw body (TradingView sends text/plain). The request path reads
+  local files only (snapshots, cached VIX); Telegram is sent in a background
+  task, so TradingView gets an answer in ms. Verdict: any skip-level check, or
+  >= 3 cautions -> SKIP; any caution or missing data -> CAUTION; else TAKE.
+  Missing data never escalates to SKIP. Staleness is judged on the data's as-of
+  date, not the snapshot's generation time. Event times are typical release times
+  (CPI/PPI/jobs/GDP 08:30 ET, FOMC 14:00 ET). Outcomes are measured on the
+  price-source symbol (e.g. GC=F for XAUUSD) against its own close at alert
+  time, never the TradingView price (spot vs futures basis). The Telegram token
+  is in the API URL, so error messages must not include the request URL.
 - **Injectable I/O**: sources accept a `session` / `downloader` argument so
   tests pass fakes. `load_settings` accepts an `env` dict. Keep it this way.
 - **Tests**: every new module gets a test file. Tests must not touch the network
@@ -150,6 +163,8 @@ python -m forecaster.backtest SPY --out results/spy   # walk-forward 2005-now (~
 python -m forecaster.pipeline      # refresh dashboard snapshots (add --backtest-stale-days 28)
 streamlit run app.py               # dashboard
 scripts/weekly_refresh.sh          # what cron runs weekly
+python -m forecaster.webhook_server --port 8000   # TradingView webhook (expose via HTTPS)
+python -m forecaster.webhook_server --stats       # outcome stats by verdict
 ```
 
 (Run from this folder with `PYTHONPATH=src`, or `pip install -e .`.)

@@ -18,4 +18,7 @@ where = ["src"]
 filterwarnings = [
     # hmmlearn 0.3.3 sets ndarray.shape, deprecated in NumPy 2.5 (upstream issue)
     "ignore:Setting the shape on a NumPy array:DeprecationWarning:hmmlearn",
+    # Starlette's TestClient now prefers a package named httpx2; the established
+    # httpx still works. Not installing an unvetted package just to silence this.
+    "ignore:Using `httpx` with `starlette.testclient` is deprecated",
 ]

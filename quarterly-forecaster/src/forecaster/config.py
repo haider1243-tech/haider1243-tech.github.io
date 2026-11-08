@@ -23,6 +23,11 @@ class Settings:
     cache_dir: Path
     cache_ttl_hours: float
     tickers: tuple[str, ...] = field(default=CORE_TICKERS)
+    # webhook server (forecaster.webhook_server)
+    webhook_secret: str | None = None
+    telegram_bot_token: str | None = None
+    telegram_chat_id: str | None = None
+    webhook_allowed_ips: tuple[str, ...] = ()
 
 
 def is_equity_symbol(ticker: str) -> bool:
@@ -69,4 +74,9 @@ def load_settings(
         cache_dir=cache_dir,
         cache_ttl_hours=float(env.get("FORECASTER_CACHE_TTL_HOURS") or 24),
         tickers=merge_tickers(CORE_TICKERS, load_watchlist(root / "watchlist.yaml")),
+        webhook_secret=env.get("WEBHOOK_SECRET") or None,
+        telegram_bot_token=env.get("TELEGRAM_BOT_TOKEN") or None,
+        telegram_chat_id=env.get("TELEGRAM_CHAT_ID") or None,
+        webhook_allowed_ips=tuple(ip.strip() for ip in (env.get("WEBHOOK_ALLOWED_IPS") or "").split(",")
+                                  if ip.strip()),
     )
