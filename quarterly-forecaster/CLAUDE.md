@@ -40,6 +40,7 @@ src/forecaster/
   calendar.py      # CPI/PPI/jobs/GDP/FOMC/earnings events, impact tags, risk density per quarter
   news.py          # headlines -> FinBERT sentiment -> daily/weekly index + shock flags
   forecast.py      # ensemble: HMM regimes + regime/GARCH Monte Carlo + LightGBM quantiles, SHAP
+  backtest.py      # walk-forward backtest vs naive baseline, calibration + stress periods
   model.py         # Forecast contract + block-bootstrap baseline model
   cli.py           # `python -m forecaster`
   sources/         # one adapter per data provider
@@ -100,6 +101,14 @@ data/              # API response cache — contents never committed
   (default 50/50 MC/LightGBM; MC only if < `min_train_rows`). Drawdown
   probability comes from the MC paths (start price counts as a peak). HMM
   fits run single-threaded (threadpoolctl) for bit-for-bit reproducibility.
+- **Backtest** (`backtest.py`): origins at every quarter-end from 2004-12-31;
+  the ensemble is refit from scratch at each one. Baseline = empirical
+  10/50/90th percentiles of all past n-day log returns (same horizon). A target
+  is scored only once its quarter is complete in the data. Model-vs-baseline
+  differences get a circular block-bootstrap CI (blocks of 4 quarters, because
+  horizons overlap). Report the verdict as the numbers say, including "does not
+  beat the baseline". Don't tune on the backtest and then quote the same
+  backtest as out-of-sample.
 - **Injectable I/O**: sources accept a `session` / `downloader` argument so
   tests pass fakes. `load_settings` accepts an `env` dict. Keep it this way.
 - **Tests**: every new module gets a test file. Tests must not touch the network
@@ -126,6 +135,7 @@ python -m forecaster.macro         # macro indicator snapshot (needs FRED_API_KE
 python -m forecaster.calendar      # upcoming events + risk density per quarter
 python -m forecaster.news          # collect + score headlines, print latest index and shocks
 python -m forecaster.forecast SPY  # ensemble forecast (add --asof YYYY-MM-DD for a backtest point)
+python -m forecaster.backtest SPY --out results/spy   # walk-forward 2005-now (~10-20 min per ticker)
 ```
 
 (Run from this folder with `PYTHONPATH=src`, or `pip install -e .`.)

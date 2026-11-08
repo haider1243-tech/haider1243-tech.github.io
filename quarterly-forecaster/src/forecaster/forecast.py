@@ -559,7 +559,15 @@ def _shap(models: dict[float, object], X_live: pd.DataFrame, labels: list[str]) 
 
 
 def ensemble_forecast(data: PointInTimeData, asof: pd.Timestamp | None = None,
-                      config: EnsembleConfig = EnsembleConfig()) -> EnsembleResult:
+                      config: EnsembleConfig = EnsembleConfig(),
+                      regimes: pd.DataFrame | None = None) -> EnsembleResult:
+    """Forecast as of `asof`.
+
+    `regimes`: optional precomputed regime_feature_table for the same data
+    and config (e.g. built once for a backtest). Only rows <= asof are used.
+    Rows <= T are identical to a fresh computation on data cut at T, which
+    test_regime_table_has_no_lookahead checks, so this is a pure speed-up.
+    """
     cfg = config
     T = pd.Timestamp(asof if asof is not None else data.prices.index.max()).normalize()
     d = data.asof(T)                                   # <- the one door to the data
@@ -591,8 +599,11 @@ def ensemble_forecast(data: PointInTimeData, asof: pd.Timestamp | None = None,
     mc_q = np.quantile(mc_ret, QUANTILES, axis=0).T            # [n_targets, 3]
 
     # 3) LightGBM quantiles on purged training rows
-    regimes = regime_feature_table(obs, T, cfg.hmm_refit_every, cfg.hmm_min_obs,
-                                   cfg.hmm_n_init, cfg.hmm_n_iter, cfg.seed)
+    if regimes is None:
+        regimes = regime_feature_table(obs, T, cfg.hmm_refit_every, cfg.hmm_min_obs,
+                                       cfg.hmm_n_init, cfg.hmm_n_iter, cfg.seed)
+    else:
+        regimes = regimes.loc[:T]
     X, y, meta = build_training_set(d, T, regimes)
     assert meta.empty or (meta["target_date"] <= T).all(), "look-ahead: unrealised target in training"
 
