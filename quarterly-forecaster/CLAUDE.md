@@ -41,10 +41,15 @@ src/forecaster/
   news.py          # headlines -> FinBERT sentiment -> daily/weekly index + shock flags
   forecast.py      # ensemble: HMM regimes + regime/GARCH Monte Carlo + LightGBM quantiles, SHAP
   backtest.py      # walk-forward backtest vs naive baseline, calibration + stress periods
+  pipeline.py      # runs models, writes JSON snapshots the dashboard reads
+  dashboard.py     # Plotly figure builders (palette-validated, light/dark)
   model.py         # Forecast contract + block-bootstrap baseline model
   cli.py           # `python -m forecaster`
   sources/         # one adapter per data provider
-tests/             # pytest, no network
+app.py             # Streamlit dashboard (reads data/snapshots/*.json only)
+scripts/weekly_refresh.sh  # cron job: pipeline + stale backtests, logs in data/logs/
+results/           # committed backtest reports + reference summary (backtest_GSPC.json)
+tests/             # pytest, no network (test_app.py drives app.py with AppTest)
 data/              # API response cache — contents never committed
 ```
 
@@ -109,6 +114,12 @@ data/              # API response cache — contents never committed
   horizons overlap). Report the verdict as the numbers say, including "does not
   beat the baseline". Don't tune on the backtest and then quote the same
   backtest as out-of-sample.
+- **Dashboard** (`app.py`): never runs models on page load; it reads snapshots
+  from `pipeline.py` (cached by file mtime). Backtest accuracy and its verdict
+  sit above every page; with no per-ticker backtest, the committed S&P 500
+  reference is shown and labelled as such. Never show a P50 without its band.
+  Charts follow the dataviz palette (validated light + dark). Accent colour is
+  blue (`.streamlit/config.toml`), so red keeps its meaning.
 - **Injectable I/O**: sources accept a `session` / `downloader` argument so
   tests pass fakes. `load_settings` accepts an `env` dict. Keep it this way.
 - **Tests**: every new module gets a test file. Tests must not touch the network
@@ -135,7 +146,10 @@ python -m forecaster.macro         # macro indicator snapshot (needs FRED_API_KE
 python -m forecaster.calendar      # upcoming events + risk density per quarter
 python -m forecaster.news          # collect + score headlines, print latest index and shocks
 python -m forecaster.forecast SPY  # ensemble forecast (add --asof YYYY-MM-DD for a backtest point)
-python -m forecaster.backtest SPY --out results/spy   # walk-forward 2005-now (~10-20 min per ticker)
+python -m forecaster.backtest SPY --out results/spy   # walk-forward 2005-now (~5 min per ticker)
+python -m forecaster.pipeline      # refresh dashboard snapshots (add --backtest-stale-days 28)
+streamlit run app.py               # dashboard
+scripts/weekly_refresh.sh          # what cron runs weekly
 ```
 
 (Run from this folder with `PYTHONPATH=src`, or `pip install -e .`.)

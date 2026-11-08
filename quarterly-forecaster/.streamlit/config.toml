@@ -1,0 +1,7 @@
+[theme]
+# Accent = categorical slot 1 (blue). Streamlit's default red reads as an
+# alarm on neutral controls (buttons, progress bars, toggles).
+primaryColor = "#2a78d6"
+
+[browser]
+gatherUsageStats = false
