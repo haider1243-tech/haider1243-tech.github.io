@@ -40,3 +40,35 @@ class FakeSession:
     def get(self, url, **kwargs):
         self.calls.append((url, kwargs))
         return FakeResponse(self.payload)
+
+
+class RoutedResponse:
+    def __init__(self, payload, status=200, url=""):
+        self._payload = payload
+        self.status_code = status
+        self.url = url
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            import requests
+
+            raise requests.HTTPError(f"{self.status_code} Error for url: {self.url}")
+
+    def json(self):
+        return self._payload
+
+
+class RoutingSession:
+    """Fake requests.Session: handler(url, params) -> payload or (status, payload)."""
+
+    def __init__(self, handler):
+        self.handler = handler
+        self.calls = []
+
+    def get(self, url, params=None, **kwargs):
+        params = params or {}
+        self.calls.append((url, params, kwargs))
+        out = self.handler(url, params)
+        status, payload = out if isinstance(out, tuple) else (200, out)
+        full = url + "?" + "&".join(f"{k}={v}" for k, v in params.items())
+        return RoutedResponse(payload, status, full)

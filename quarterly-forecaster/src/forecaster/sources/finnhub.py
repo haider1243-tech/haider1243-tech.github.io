@@ -47,3 +47,8 @@ class FinnhubClient:
 
     def basic_financials(self, symbol: str) -> dict:
         return self._get("stock/metric", symbol=symbol, metric="all")
+
+    def earnings_calendar(self, symbol: str, start: str, end: str) -> list[dict]:
+        """Upcoming/recent earnings for `symbol` between ISO dates start..end."""
+        data = self._get("calendar/earnings", symbol=symbol, **{"from": start, "to": end})
+        return (data or {}).get("earningsCalendar") or []

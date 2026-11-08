@@ -1,23 +1,19 @@
-"""FRED macro series (free API key required)."""
+"""FRED API client (free API key required). Every request is cached.
+
+FRED only accepts the key as a query parameter, so it is never included in
+cache keys, logs or error messages produced here.
+"""
 
 from __future__ import annotations
+
+from typing import Any
 
 import pandas as pd
 import requests
 
 from forecaster.cache import Cache
 
-FRED_URL = "https://api.stlouisfed.org/fred/series/observations"
-
-# Useful defaults for equity-regime context.
-DEFAULT_SERIES = {
-    "DGS10": "10Y Treasury yield",
-    "DGS2": "2Y Treasury yield",
-    "T10Y2Y": "10Y-2Y spread",
-    "FEDFUNDS": "Fed funds rate",
-    "CPIAUCSL": "CPI",
-    "UNRATE": "Unemployment rate",
-}
+FRED_BASE = "https://api.stlouisfed.org/fred"
 
 
 class FredClient:
@@ -31,24 +27,54 @@ class FredClient:
         self.cache = cache
         self.session = session or requests.Session()
 
-    def get_series(self, series_id: str) -> pd.Series:
+    def _get(self, endpoint: str, **params: Any) -> dict:
         if not self.api_key:
             raise RuntimeError("FRED_API_KEY is not set (see .env.example)")
-        key = Cache.make_key("fred", series_id=series_id)
+        key = Cache.make_key("fred_" + endpoint.replace("/", "_"), **params)
 
-        def fetch() -> list[dict]:
+        def fetch() -> dict:
             r = self.session.get(
-                FRED_URL,
-                params={"series_id": series_id, "api_key": self.api_key, "file_type": "json"},
+                f"{FRED_BASE}/{endpoint}",
+                params={**params, "api_key": self.api_key, "file_type": "json"},
                 timeout=30,
             )
-            r.raise_for_status()
-            return r.json()["observations"]
+            try:
+                r.raise_for_status()
+            except requests.HTTPError as exc:
+                # Re-raise without the URL, which contains the API key.
+                raise RuntimeError(
+                    f"FRED {endpoint} failed: HTTP {r.status_code} for params {params}"
+                ) from None
+            return r.json()
 
-        obs = self.cache.get_or_fetch(key, fetch)
+        return self.cache.get_or_fetch(key, fetch)
+
+    # -- observations ------------------------------------------------------ #
+    def get_series(self, series_id: str) -> pd.Series:
+        """Full observation history for a series ("." values dropped)."""
+        obs = self._get("series/observations", series_id=series_id)["observations"]
         s = pd.Series(
-            pd.to_numeric([o["value"] for o in obs], errors="coerce"),  # "." = missing
+            pd.to_numeric([o["value"] for o in obs], errors="coerce"),
             index=pd.to_datetime([o["date"] for o in obs]),
             name=series_id,
         )
         return s.dropna()
+
+    # -- releases ---------------------------------------------------------- #
+    def release_for_series(self, series_id: str) -> dict:
+        """The release (id, name) a series is published in."""
+        releases = self._get("series/release", series_id=series_id)["releases"]
+        if not releases:
+            raise ValueError(f"No FRED release found for series {series_id}")
+        return releases[0]
+
+    def release_dates(self, release_id: int, limit: int = 100) -> list[pd.Timestamp]:
+        """Release dates, including scheduled future dates, newest first."""
+        data = self._get(
+            "release/dates",
+            release_id=release_id,
+            include_release_dates_with_no_data="true",
+            sort_order="desc",
+            limit=limit,
+        )
+        return [pd.Timestamp(d["date"]) for d in data["release_dates"]]
