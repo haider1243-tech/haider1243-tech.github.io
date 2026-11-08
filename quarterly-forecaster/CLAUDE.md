@@ -46,6 +46,7 @@ src/forecaster/
   webhook_server.py # FastAPI: TradingView alert -> risk checks -> TAKE/CAUTION/SKIP -> Telegram + SQLite
   vwap_backtest.py # bar-for-bar Python port of pine/vwap_gold.pine (TV broker-emulator rules)
   execution.py     # OANDA v20 orders for TAKE verdicts only; practice default; hard limits + kill switch
+  portfolio.py     # portfolio.yaml -> CAD value, P&L, allocation, beta/vol, joint-bootstrap forecast
   model.py         # Forecast contract + block-bootstrap baseline model
   cli.py           # `python -m forecaster`
   sources/         # one adapter per data provider
@@ -167,6 +168,15 @@ data/              # API response cache — contents never committed
   response blocks the order; 3 in a row trip the kill switch. Tests use
   `httpx.MockTransport`; never hit OANDA in tests. The token goes in the
   Authorization header only and is never logged or stored.
+- **Portfolio** (`portfolio.py`): `portfolio.yaml` is personal and gitignored.
+  Never commit it or print holdings in commits/PRs; `portfolio.example.yaml` is the
+  template. P&L is CAD; a USD cost without `cost_fx` is converted at today's rate
+  and labelled (it excludes FX since purchase). Risk uses current weights on daily
+  CAD returns aligned by inner join (TSX/NYSE holidays differ); cash has zero vol.
+  The forecast is a joint block bootstrap (rows of all holdings together, so
+  correlation is kept; a test fails if assets are resampled independently).
+  Buy-and-hold, not backtested. Say so wherever it's shown. Concentration flag:
+  a holding (summed across accounts) strictly above `concentration_limit` (25%).
 - **Injectable I/O**: sources accept a `session` / `downloader` argument so
   tests pass fakes. `load_settings` accepts an `env` dict. Keep it this way.
 - **Tests**: every new module gets a test file. Tests must not touch the network

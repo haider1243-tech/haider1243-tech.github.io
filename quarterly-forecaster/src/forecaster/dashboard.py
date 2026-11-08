@@ -103,7 +103,7 @@ def fan_chart(snap: dict, pal: dict, height: int = 440) -> go.Figure:
     fig = go.Figure()
     if not hist.empty:
         fig.add_trace(go.Scatter(
-            x=pd.to_datetime(hist["date"]), y=hist["close"], name="Weekly close",
+            x=pd.to_datetime(hist["date"]), y=hist["close"], name=snap.get("history_label", "Weekly close"),
             mode="lines", line=dict(color=pal["s1"], width=2),
             hovertemplate=pre + "%{y:,.2f}<extra>Close</extra>"))
     # band: upper edge first, lower edge fills up to it
@@ -125,7 +125,7 @@ def fan_chart(snap: dict, pal: dict, height: int = 440) -> go.Figure:
         fig.add_annotation(x=x[-1], y=ys[-1], text=f"{name} {pre}{ys[-1]:,.0f}", showarrow=False,
                            xanchor="left", xshift=8, font=dict(color=pal["ink2"], size=12))
     fig.update_layout(hovermode="x unified")
-    _layout(fig, pal, height, y_format=",.0f", y_title=f"Price ({unit(snap)})")
+    _layout(fig, pal, height, y_format=",.0f", y_title=f"{snap.get('value_label', 'Price')} ({unit(snap)})")
     fig.update_layout(margin=dict(r=110))  # room for the P10/P50/P90 end labels
     fig.update_xaxes(range=[x[0] - pd.DateOffset(years=2) if hist.empty else pd.to_datetime(hist["date"]).min(),
                             x[-1] + pd.DateOffset(days=120)])
@@ -260,4 +260,28 @@ def sentiment_trend(rows: list[dict], pal: dict, height: int = 260) -> go.Figure
     fig.add_hline(y=0, line=dict(color=pal["axis"], width=1))
     _layout(fig, pal, height, legend=len(sh) > 0, y_title="P(pos) − P(neg)")
     fig.update_yaxes(range=[-1, 1])
+    return fig
+
+
+# --------------------------------------------------------------------------- #
+# Portfolio
+# --------------------------------------------------------------------------- #
+
+def allocation_chart(items: list[dict], pal: dict, highlight_over: float | None = None) -> go.Figure:
+    """Ranked horizontal bars of weights (one series: slot 1). Bars over
+    `highlight_over` keep the same colour; the label carries the warning so colour is never alone."""
+    df = pd.DataFrame(items).sort_values("weight")
+    txt = [f"{w:.1%}" + ("  ⚠ over limit" if highlight_over is not None and w > highlight_over else "")
+           for w in df["weight"]]
+    fig = go.Figure(go.Bar(x=df["weight"], y=df["label"], orientation="h", text=txt, textposition="outside",
+                           cliponaxis=False, marker=dict(color=pal["s1"], cornerradius=4),
+                           textfont=dict(color=pal["ink2"]),
+                           hovertemplate="%{y}: %{x:.1%}<extra></extra>"))
+    _layout(fig, pal, height=40 + 30 * max(len(df), 1), legend=False)
+    fig.update_layout(bargap=0.4, margin=dict(l=8, r=90, t=8, b=8))
+    fig.update_xaxes(tickformat=".0%", range=[0, max(0.05, float(df["weight"].max()) * 1.3)],
+                     showgrid=True, gridcolor=pal["grid"])
+    fig.update_yaxes(showgrid=False, tickfont=dict(color=pal["ink2"]))
+    if highlight_over is not None:
+        fig.add_vline(x=highlight_over, line=dict(color=pal["muted"], width=1, dash="dot"))
     return fig

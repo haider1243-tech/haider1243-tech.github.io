@@ -233,6 +233,10 @@ def load_ticker(settings: Settings, ticker: str) -> dict | None:
     return read_json(snapshot_dir(settings) / f"ticker_{safe_name(ticker)}.json")
 
 
+def load_portfolio_snapshot(settings: Settings) -> dict | None:
+    return read_json(snapshot_dir(settings) / "portfolio.json")
+
+
 def load_market(settings: Settings) -> dict | None:
     return read_json(snapshot_dir(settings) / "market.json")
 
@@ -343,6 +347,16 @@ def refresh_all(settings: Settings, tickers: list[str] | None = None, warn: Warn
         except Exception as exc:
             status["market"] = f"failed: {exc}"
             warn(f"market: {exc}")
+    if market:
+        from forecaster.portfolio import PORTFOLIO_FILE, refresh_portfolio
+
+        if PORTFOLIO_FILE.exists():
+            try:
+                refresh_portfolio(settings, warn=warn)
+                status["portfolio"] = "ok"
+            except Exception as exc:
+                status["portfolio"] = f"failed: {exc}"
+                warn(f"portfolio: {exc}")
     for t in tickers or list(settings.tickers):
         try:
             refresh_ticker(settings, t, warn)

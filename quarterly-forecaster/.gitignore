@@ -20,3 +20,6 @@ __pycache__/
 htmlcov/
 build/
 dist/
+
+# Personal holdings — never commit
+portfolio.yaml

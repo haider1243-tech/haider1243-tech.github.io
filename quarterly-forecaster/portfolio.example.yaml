@@ -1,0 +1,26 @@
+# Copy to portfolio.yaml (gitignored: your holdings never get committed) and edit.
+#   cp portfolio.example.yaml portfolio.yaml
+#
+# Per holding:
+#   ticker         Yahoo symbol (XEQT.TO, VFV.TO, SPY, ...)
+#   shares         number of shares/units
+#   avg_cost       average cost per share
+#   account        TFSA | FHSA | RRSP | cash   (cash = non-registered)
+#   cost_currency  CAD or USD. Defaults to the ticker's trading currency.
+#                  For US-listed holdings, giving your CAD cost (ACB) is best:
+#                  set cost_currency: CAD. If you give a USD cost, add cost_fx
+#                  (USD/CAD on purchase, e.g. 1.36) for a true CAD P&L.
+#   Optional overrides: name, asset_class (Equity / Fixed income / Commodity),
+#                       region, sectors: {Technology: 0.3, Financials: 0.2, ...}
+holdings:
+  - {ticker: XEQT.TO, shares: 400, avg_cost: 27.80, account: TFSA}
+  - {ticker: VFV.TO, shares: 60, avg_cost: 118.50, account: RRSP}
+  - {ticker: XIU.TO, shares: 150, avg_cost: 31.20, account: FHSA}
+  - {ticker: ZAG.TO, shares: 300, avg_cost: 13.90, account: RRSP}
+  - {ticker: SPY, shares: 5, avg_cost: 560.00, cost_currency: USD, cost_fx: 1.37, account: cash}
+
+cash:
+  - {account: TFSA, amount: 750, currency: CAD}
+
+# Flag any single holding above this share of the portfolio.
+concentration_limit: 0.25

@@ -46,6 +46,28 @@ daily index with shocks, top headlines). Backtest accuracy is shown above each p
 until a ticker has its own backtest, the committed S&P 500 reference result is shown
 and labelled as such.
 
+## Portfolio
+
+```bash
+cp portfolio.example.yaml portfolio.yaml   # gitignored: your holdings are never committed
+# edit: ticker, shares, avg_cost, account (TFSA / FHSA / RRSP / cash), optional cash balances
+python -m forecaster.pipeline              # or press Refresh data in the app
+```
+
+The **Portfolio** page shows:
+- market value and unrealised P&L in CAD
+- allocation by asset class, sector (ETFs looked through where sector weights are known), account and region
+- volatility, beta vs the S&P/TSX 60 and the S&P 500 in CAD, and each holding's share of portfolio risk
+- a 4-quarter P10/P50/P90 range for the whole portfolio, from 10,000 simulated paths
+- a warning for any holding above 25% (`concentration_limit`)
+
+The paths resample blocks of real *joint* daily CAD returns, so correlations between holdings are
+kept. The method hasn't been backtested, and its median inherits the history window's drift.
+
+For US-listed holdings, enter your CAD cost (`cost_currency: CAD`), or a USD cost plus `cost_fx`
+(the USD/CAD rate when you bought). Otherwise the P&L leaves out currency gains or losses since
+purchase, and the holding is labelled to say so.
+
 ## Weekly auto-refresh
 
 `scripts/weekly_refresh.sh` refreshes everything, re-runs any backtest older than

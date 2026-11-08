@@ -24,7 +24,7 @@ from forecaster.config import load_settings  # noqa: E402
 
 st.set_page_config(page_title="Quarterly Forecaster", page_icon="📈", layout="wide")
 
-PAGES = ("Forecast", "Macro & events", "Sentiment & news")
+PAGES = ("Forecast", "Portfolio", "Macro & events", "Sentiment & news")
 QUANTILE_LABELS = {0.1: "P10 (downside)", 0.5: "P50 (median)", 0.9: "P90 (upside)"}
 
 
@@ -54,6 +54,10 @@ def read_snapshot(path: Path) -> dict | None:
 
 def ticker_snap(t: str) -> dict | None:
     return read_snapshot(snap_dir / f"ticker_{pipeline.safe_name(t)}.json")
+
+
+def portfolio_snap() -> dict | None:
+    return read_snapshot(snap_dir / "portfolio.json")
 
 
 def market_snap() -> dict | None:
@@ -366,7 +370,101 @@ def page_sentiment(t: str) -> None:
         })
 
 
+def page_portfolio(_t: str) -> None:
+    ps = portfolio_snap()
+    if ps is None:
+        st.info("No portfolio snapshot yet. Copy `portfolio.example.yaml` to `portfolio.yaml`, enter your "
+                "holdings, then press **Refresh data** (or run `python -m forecaster.pipeline`). "
+                "portfolio.yaml is gitignored, so your holdings are never committed.", icon="ℹ️")
+        return
+    as_of = pd.Timestamp(ps["as_of"])
+    st.subheader("Portfolio (CAD)")
+    st.caption(f"As of {as_of:%b %d, %Y} · USD converted at USD/CAD {ps['usd_cad']:.4f}")
+    for w in ps.get("warnings", []):
+        st.warning(w, icon="⚠️")
+    for f in ps.get("flags", []):
+        st.warning(f["message"], icon="⚠️")
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Market value", f"C${ps['total_value']:,.0f}")
+    pnl_pct = ps.get("total_pnl_pct")
+    c2.metric("Unrealised P&L", f"C${ps['total_pnl']:+,.0f}",
+              None if pnl_pct is None else f"{pnl_pct:+.1%} on cost C${ps['total_cost']:,.0f}", delta_color="normal")
+    r = ps.get("risk")
+    if r:
+        c3.metric("Volatility (annualised)", f"{r['volatility']:.1%}")
+        c3.caption(f"{r['n_days']} common trading days of CAD returns")
+        betas = r["beta"]
+        c4.metric("Beta vs S&P/TSX 60", f"{betas.get('XIU.TO', float('nan')):.2f}")
+        c4.caption(f"vs S&P 500 in CAD: {betas.get('SPY', float('nan')):.2f}")
+    else:
+        c3.metric("Volatility", "n/a")
+        c4.metric("Beta", "n/a")
+
+    st.markdown("**Holdings**")
+    h = pd.DataFrame(ps["holdings"])
+    show = pd.DataFrame({
+        "Ticker": h["ticker"], "Name": h["name"], "Account": h["account"], "Class": h["class"],
+        "Shares": h["shares"].map(lambda x: "" if pd.isna(x) else f"{x:,.4g}"),
+        "Price": [("C$" if c == "CAD" else "US$") + f"{p:,.2f}" if pd.notna(p) else "" for c, p in zip(h["currency"], h["price"])],
+        "Value (CAD)": h["market_value"], "Weight": h["weight"],
+        "P&L (CAD)": h["pnl"], "P&L %": h["pnl_pct"], "Note": h["note"].fillna("")})
+    st.dataframe(show, hide_index=True, use_container_width=True, column_config={
+        "Value (CAD)": st.column_config.NumberColumn(format="%.2f"),
+        "P&L (CAD)": st.column_config.NumberColumn(format="%+.2f"),
+        "P&L %": st.column_config.NumberColumn(format="percent"),
+        "Weight": st.column_config.ProgressColumn(min_value=0.0, max_value=1.0, format="percent")})
+
+    a, b = st.columns(2)
+    alloc = ps["allocation"]
+    a.markdown("**By asset class**")
+    a.plotly_chart(viz.allocation_chart(alloc["asset_class"], pal), use_container_width=True)
+    b.markdown("**By sector (ETFs looked through)**")
+    b.plotly_chart(viz.allocation_chart(alloc["sector"], pal), use_container_width=True)
+    a.markdown("**By account**")
+    a.plotly_chart(viz.allocation_chart(alloc["account"], pal), use_container_width=True)
+    b.markdown("**By region**")
+    b.plotly_chart(viz.allocation_chart(alloc["region"], pal), use_container_width=True)
+
+    if r:
+        st.markdown("**Risk by holding**")
+        rh = pd.DataFrame(r["holdings"])
+        st.dataframe(pd.DataFrame({
+            "Ticker": rh["ticker"], "Weight": rh["weight"], "Volatility": rh["volatility"],
+            "Beta vs TSX 60": rh["beta_XIU.TO"], "Beta vs S&P 500 (CAD)": rh["beta_SPY"],
+            "Share of portfolio risk": rh["risk_share"]}), hide_index=True, use_container_width=True,
+            column_config={"Weight": st.column_config.NumberColumn(format="percent"),
+                           "Volatility": st.column_config.NumberColumn(format="percent"),
+                           "Beta vs TSX 60": st.column_config.NumberColumn(format="%.2f"),
+                           "Beta vs S&P 500 (CAD)": st.column_config.NumberColumn(format="%.2f"),
+                           "Share of portfolio risk": st.column_config.NumberColumn(format="percent")})
+        st.caption("Share of risk = the holding's contribution to portfolio variance; it can exceed its weight "
+                   "for volatile holdings. USD holdings' volatility includes the USD/CAD moves.")
+
+    st.subheader("Portfolio value: next 4 quarters")
+    if not ps["forecast"]:
+        st.info("Forecast unavailable (see warnings above).", icon="ℹ️")
+        return
+    st.plotly_chart(viz.fan_chart(ps, pal), use_container_width=True)
+    ft = pd.DataFrame(ps["forecast"])
+    st.dataframe(pd.DataFrame({
+        "Quarter": ft["quarter"], "Target date": pd.to_datetime(ft["target_date"]).dt.date,
+        "P10 (CAD)": ft["p10"], "P50 (CAD)": ft["p50"], "P90 (CAD)": ft["p90"],
+        "P(below today)": ft["prob_loss"], "P(>10% drawdown by then)": ft["prob_drawdown"]}),
+        hide_index=True, use_container_width=True, column_config={
+            **{c: st.column_config.NumberColumn(format="%.0f") for c in ("P10 (CAD)", "P50 (CAD)", "P90 (CAD)")},
+            "P(below today)": st.column_config.NumberColumn(format="percent"),
+            "P(>10% drawdown by then)": st.column_config.ProgressColumn(min_value=0.0, max_value=1.0, format="percent")})
+    sim = ps.get("simulation") or {}
+    st.caption(f"Method: {ps['forecast_method']}. Paths replay blocks of real joint daily returns since "
+               f"{str(sim.get('history_start'))[:10]}, so correlations, fat tails and the USD/CAD effect come "
+               "from history. Holdings stay fixed (no rebalancing or contributions). The P50 inherits that "
+               "window's drift, so a strong decade makes it optimistic. This is not the ensemble model, and it "
+               "hasn't been backtested.")
+
+
 # --------------------------------------------------------------------------- #
 
 backtest_banner(ticker)
-{"Forecast": page_forecast, "Macro & events": page_macro, "Sentiment & news": page_sentiment}[page](ticker)
+{"Forecast": page_forecast, "Portfolio": page_portfolio, "Macro & events": page_macro,
+ "Sentiment & news": page_sentiment}[page](ticker)
