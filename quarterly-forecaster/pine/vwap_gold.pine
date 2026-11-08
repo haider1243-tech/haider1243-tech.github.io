@@ -1,0 +1,230 @@
+//@version=6
+// VWAP Gold: session-VWAP reclaim / rejection strategy for XAUUSD.
+// Python port for checking against the Strategy Tester: src/forecaster/vwap_backtest.py.
+// Keep the two in sync. tests/test_vwap_backtest.py checks the default event list matches.
+//
+// Logic (evaluated at bar close; orders fill at the next bar's open)
+//   Session VWAP resets 18:00 New York. Bands = VWAP +/- k * volume-weighted st. dev. of hlc3.
+//   Long  reclaim:   close[1] < vwap[1] and close > vwap
+//   Long  rejection: close[1] > vwap[1] and low <= vwap and close > vwap   (tests VWAP from above, holds)
+//   Short loss:      close[1] > vwap[1] and close < vwap
+//   Short rejection: close[1] < vwap[1] and high >= vwap and close < vwap
+//   Filters: close inside the 2-sigma band, volume > SMA * mult, DXY/US10Y trend, entry window,
+//            no entries in the event blackout (listed events -pre/+post minutes).
+//   Risk: stop = ATR * mult from the signal close, target = stop distance * R,
+//         size = equity * risk% / (stop distance * point value), capped by max leverage.
+//   Positions are closed at the end of the day (default bar closing >= 16:55 New York).
+//
+// request.economic() returns data *values*, not a release calendar: it can't block entries
+// BEFORE a release, and FOMC "hold" meetings don't change the rate series. Pre-event blocking
+// therefore uses the explicit event list (FOMC 2021-2027 built in; paste CPI/PPI times from
+// `python -m forecaster.vwap_backtest --pine-events --fred-events`). The request.economic()
+// post-release block is optional and off by default: check its markers on the chart first.
+//
+// Alerts: create ONE alert on this strategy with condition "alert() function calls only" and
+// your webhook URL. Messages use the webhook server's format:
+//   {"ticker":"XAUUSD","price":"2650.40","strategy":"vwap_gold","side":"long","time":"...Z","secret":"..."}
+// Only entries send alerts (the server treats every alert as a new long/short signal).
+
+strategy("VWAP Gold", shorttitle = "VWAP Gold", overlay = true,
+     initial_capital = 10000, currency = currency.USD,
+     default_qty_type = strategy.fixed, default_qty_value = 1, pyramiding = 0,
+     process_orders_on_close = false, calc_on_every_tick = false, calc_on_order_fills = false,
+     commission_type = strategy.commission.cash_per_order, commission_value = 0,
+     slippage = 0, margin_long = 5, margin_short = 5)
+
+// ---------------------------------------------------------------- defaults
+const string FOMC_2021 = "2021-01-27 14:00 FOMC,2021-03-17 14:00 FOMC,2021-04-28 14:00 FOMC,2021-06-16 14:00 FOMC,2021-07-28 14:00 FOMC,2021-09-22 14:00 FOMC,2021-11-03 14:00 FOMC,2021-12-15 14:00 FOMC"
+const string FOMC_2022 = "2022-01-26 14:00 FOMC,2022-03-16 14:00 FOMC,2022-05-04 14:00 FOMC,2022-06-15 14:00 FOMC,2022-07-27 14:00 FOMC,2022-09-21 14:00 FOMC,2022-11-02 14:00 FOMC,2022-12-14 14:00 FOMC"
+const string FOMC_2023 = "2023-02-01 14:00 FOMC,2023-03-22 14:00 FOMC,2023-05-03 14:00 FOMC,2023-06-14 14:00 FOMC,2023-07-26 14:00 FOMC,2023-09-20 14:00 FOMC,2023-11-01 14:00 FOMC,2023-12-13 14:00 FOMC"
+const string FOMC_2024 = "2024-01-31 14:00 FOMC,2024-03-20 14:00 FOMC,2024-05-01 14:00 FOMC,2024-06-12 14:00 FOMC,2024-07-31 14:00 FOMC,2024-09-18 14:00 FOMC,2024-11-07 14:00 FOMC,2024-12-18 14:00 FOMC"
+const string FOMC_2025 = "2025-01-29 14:00 FOMC,2025-03-19 14:00 FOMC,2025-05-07 14:00 FOMC,2025-06-18 14:00 FOMC,2025-07-30 14:00 FOMC,2025-09-17 14:00 FOMC,2025-10-29 14:00 FOMC,2025-12-10 14:00 FOMC"
+const string FOMC_2026 = "2026-01-28 14:00 FOMC,2026-03-18 14:00 FOMC,2026-04-29 14:00 FOMC,2026-06-17 14:00 FOMC,2026-07-29 14:00 FOMC,2026-09-16 14:00 FOMC,2026-10-28 14:00 FOMC,2026-12-09 14:00 FOMC"
+const string FOMC_2027 = "2027-01-27 14:00 FOMC,2027-03-17 14:00 FOMC,2027-04-28 14:00 FOMC,2027-06-09 14:00 FOMC,2027-07-28 14:00 FOMC,2027-09-15 14:00 FOMC,2027-10-27 14:00 FOMC,2027-12-08 14:00 FOMC"
+const string FOMC_ALL = FOMC_2021 + "," + FOMC_2022 + "," + FOMC_2023 + "," + FOMC_2024 + "," + FOMC_2025 + "," + FOMC_2026 + "," + FOMC_2027
+
+// ---------------------------------------------------------------- inputs
+grpS = "Signals"
+useReclaim = input.bool(true, "VWAP reclaim / loss", group = grpS)
+useReject  = input.bool(true, "VWAP rejection (test and hold)", group = grpS)
+allowLong  = input.bool(true, "Allow longs", group = grpS)
+allowShort = input.bool(true, "Allow shorts", group = grpS)
+band1      = input.float(1.0, "Band 1 (st. dev.)", minval = 0.1, step = 0.1, group = grpS)
+band2      = input.float(2.0, "Band 2 (st. dev.) - no entries beyond", minval = 0.1, step = 0.1, group = grpS)
+useVol     = input.bool(true, "Require volume confirmation", group = grpS)
+volLen     = input.int(20, "Volume SMA length", minval = 1, group = grpS)
+volMult    = input.float(1.2, "Volume > SMA x", minval = 0.0, step = 0.1, group = grpS)
+entryWin   = input.session("0300-1600", "Entry window (bar open, New York)", group = grpS)
+flatH      = input.int(16, "Flatten at hour (New York, bar close)", minval = 0, maxval = 23, group = grpS)
+flatM      = input.int(55, "Flatten at minute", minval = 0, maxval = 59, group = grpS)
+
+grpR = "Risk"
+riskPct = input.float(1.0, "Risk per trade (% of equity)", minval = 0.01, maxval = 5.0, step = 0.05, group = grpR)
+atrLen  = input.int(14, "ATR length", minval = 1, group = grpR)
+atrMult = input.float(1.5, "Stop = ATR x", minval = 0.1, step = 0.1, group = grpR)
+tpR     = input.float(2.0, "Take profit (R multiple)", minval = 0.1, step = 0.1, group = grpR)
+qtyStep = input.float(1.0, "Quantity step (units)", minval = 0.000001, group = grpR)
+maxLev  = input.float(20.0, "Max leverage (notional / equity)", minval = 0.1, group = grpR)
+
+grpM = "Macro filter"
+useMacro    = input.bool(true, "Filter with DXY and US 10Y yield", group = grpM)
+dxySym      = input.symbol("TVC:DXY", "DXY symbol", group = grpM)
+yldSym      = input.symbol("TVC:US10Y", "US 10Y yield symbol", group = grpM)
+macroLen    = input.int(50, "Trend EMA length", minval = 1, group = grpM)
+macroStrict = input.bool(true, "Require both favourable (off: at most one against)", group = grpM)
+
+grpE = "Event blackout"
+useEvents = input.bool(true, "Block entries around listed events", group = grpE)
+preMin    = input.int(30, "Minutes before event", minval = 0, group = grpE)
+postMin   = input.int(60, "Minutes after event", minval = 0, group = grpE)
+eventsTxt = input.text_area(FOMC_ALL, "Events, New York time: YYYY-MM-DD HH:MM [tag], comma or newline separated", group = grpE)
+useEcon   = input.bool(false, "Also block after request.economic() releases (verify markers first)", group = grpE)
+cpiField  = input.string("CPI", "CPI field code", group = grpE)
+ppiField  = input.string("PPI", "PPI field code (check TradingView's field list)", group = grpE)
+rateField = input.string("INTR", "Policy rate field code", group = grpE)
+
+grpA = "Webhook alerts"
+whSecret   = input.string("", "Webhook secret (WEBHOOK_SECRET); no alerts if empty", group = grpA)
+whStrategy = input.string("vwap_gold", "Strategy name in alerts", group = grpA)
+
+// ---------------------------------------------------------------- event list
+var array<int> evts = array.new<int>()
+if barstate.isfirst and useEvents
+    string norm = str.replace_all(str.replace_all(eventsTxt, "\r", ""), "\n", ",")
+    for tok in str.split(norm, ",")
+        string t = str.replace_all(str.replace_all(tok, " ", ""), "\t", "")
+        if str.length(t) >= 15
+            if str.substring(t, 4, 5) == "-" and str.substring(t, 7, 8) == "-" and str.substring(t, 12, 13) == ":"
+                float y  = str.tonumber(str.substring(t, 0, 4))
+                float mo = str.tonumber(str.substring(t, 5, 7))
+                float d  = str.tonumber(str.substring(t, 8, 10))
+                float h  = str.tonumber(str.substring(t, 10, 12))
+                float mi = str.tonumber(str.substring(t, 13, 15))
+                if not na(y) and not na(mo) and not na(d) and not na(h) and not na(mi)
+                    evts.push(timestamp("America/New_York", int(y), int(mo), int(d), int(h), int(mi)))
+    evts.sort(order.ascending)
+
+var int evIdx = 0
+bool listBlocked = false
+if useEvents and evts.size() > 0
+    while evIdx < evts.size() and evts.get(evIdx) + postMin * 60000 < time_close
+        evIdx += 1
+    if evIdx < evts.size()
+        int ev = evts.get(evIdx)
+        listBlocked := time_close >= ev - preMin * 60000 and time_close <= ev + postMin * 60000
+
+// optional: block after a detected economic release (values arrive only on release bars with gaps_on)
+float cpiRel  = request.economic("US", cpiField, gaps = barmerge.gaps_on, ignore_invalid_symbol = true)
+float ppiRel  = request.economic("US", ppiField, gaps = barmerge.gaps_on, ignore_invalid_symbol = true)
+float rateRel = request.economic("US", rateField, gaps = barmerge.gaps_on, ignore_invalid_symbol = true)
+bool econHit = not na(cpiRel) or not na(ppiRel) or not na(rateRel)
+var int lastRelease = na
+if econHit
+    lastRelease := time
+bool econBlocked = useEcon and not na(lastRelease) and time_close - lastRelease <= postMin * 60000
+bool blocked = listBlocked or econBlocked
+
+// ---------------------------------------------------------------- session VWAP + bands
+string sessKey = str.format_time(time + 6 * 3600000, "yyyy-MM-dd", "America/New_York")
+bool newSess = barstate.isfirst or sessKey != sessKey[1]
+float src = hlc3
+float vol = nz(volume)
+var float sV = 0.0
+var float sPV = 0.0
+var float sP2V = 0.0
+if newSess
+    sV := 0.0
+    sPV := 0.0
+    sP2V := 0.0
+sV += vol
+sPV += src * vol
+sP2V += src * src * vol
+float vwap = sV > 0 ? sPV / sV : src
+float sd = sV > 0 ? math.sqrt(math.max(sP2V / sV - vwap * vwap, 0.0)) : 0.0
+float up1 = vwap + band1 * sd
+float dn1 = vwap - band1 * sd
+float up2 = vwap + band2 * sd
+float dn2 = vwap - band2 * sd
+
+// ---------------------------------------------------------------- filters
+float atr = ta.atr(atrLen)
+float volSma = ta.sma(vol, volLen)
+bool volOk = not useVol or (not na(volSma) and vol > volSma * volMult)
+
+f_trend(int len) =>
+    float e = ta.ema(close, len)
+    na(e) ? na : close > e ? 1.0 : 0.0
+float dxyUp = request.security(dxySym, timeframe.period, f_trend(macroLen), lookahead = barmerge.lookahead_off)
+float yldUp = request.security(yldSym, timeframe.period, f_trend(macroLen), lookahead = barmerge.lookahead_off)
+bool macroKnown = not na(dxyUp) and not na(yldUp)
+int againstLong = (dxyUp == 1.0 ? 1 : 0) + (yldUp == 1.0 ? 1 : 0)
+int againstShort = (dxyUp == 0.0 ? 1 : 0) + (yldUp == 0.0 ? 1 : 0)
+int lim = macroStrict ? 0 : 1
+bool macroLongOk = not useMacro or (macroKnown and againstLong <= lim)
+bool macroShortOk = not useMacro or (macroKnown and againstShort <= lim)
+
+bool inWin = not na(time(timeframe.period, entryWin, "America/New_York"))
+int closeMin = hour(time_close, "America/New_York") * 60 + minute(time_close, "America/New_York")
+bool flatWin = closeMin >= flatH * 60 + flatM and closeMin < 18 * 60
+
+// ---------------------------------------------------------------- signals
+bool longReclaim  = useReclaim and close[1] < vwap[1] and close > vwap
+bool longReject   = useReject and close[1] > vwap[1] and low <= vwap and close > vwap
+bool shortLose    = useReclaim and close[1] > vwap[1] and close < vwap
+bool shortReject  = useReject and close[1] < vwap[1] and high >= vwap and close < vwap
+bool base = volOk and inWin and not flatWin and not blocked and not na(atr)
+bool longSig  = allowLong and (longReclaim or longReject) and close < up2 and macroLongOk and base
+bool shortSig = allowShort and (shortLose or shortReject) and close > dn2 and macroShortOk and base
+
+// ---------------------------------------------------------------- alerts (webhook server format)
+f_clean(string s) =>
+    str.replace_all(str.replace_all(s, '"', ""), "\\", "")
+f_json(string side) =>
+    string ts = str.format_time(time_close, "yyyy-MM-dd", "UTC") + "T" + str.format_time(time_close, "HH:mm:ss", "UTC") + "Z"
+    '{"ticker":"' + syminfo.ticker + '","price":"' + str.tostring(close, format.mintick) + '","strategy":"' + f_clean(whStrategy) + '","side":"' + side + '","time":"' + ts + '","secret":"' + f_clean(whSecret) + '"}'
+
+// ---------------------------------------------------------------- orders
+if strategy.position_size != 0 and flatWin
+    strategy.close_all(comment = "End of day", immediately = true)
+
+if strategy.position_size == 0 and (longSig or shortSig)
+    float stopDist = atr * atrMult
+    float eq = strategy.equity
+    float qty = eq * riskPct / 100.0 / (stopDist * syminfo.pointvalue)
+    qty := math.min(qty, eq * maxLev / (close * syminfo.pointvalue))
+    qty := math.floor(qty / qtyStep) * qtyStep
+    if qty > 0 and stopDist > 0
+        if longSig
+            strategy.entry("L", strategy.long, qty = qty, comment = longReclaim ? "L reclaim" : "L reject")
+            strategy.exit("XL", from_entry = "L", stop = close - stopDist, limit = close + stopDist * tpR)
+            if whSecret != ""
+                alert(f_json("long"), alert.freq_once_per_bar_close)
+        else
+            strategy.entry("S", strategy.short, qty = qty, comment = shortLose ? "S loss" : "S reject")
+            strategy.exit("XS", from_entry = "S", stop = close + stopDist, limit = close - stopDist * tpR)
+            if whSecret != ""
+                alert(f_json("short"), alert.freq_once_per_bar_close)
+
+// ---------------------------------------------------------------- plots
+plot(newSess ? na : vwap, "VWAP", color.new(#eb6834, 0), 2, plot.style_linebr)
+plot(newSess ? na : up1, "Upper 1", color.new(#2a78d6, 30), 1, plot.style_linebr)
+plot(newSess ? na : dn1, "Lower 1", color.new(#2a78d6, 30), 1, plot.style_linebr)
+plot(newSess ? na : up2, "Upper 2", color.new(#2a78d6, 60), 1, plot.style_linebr)
+plot(newSess ? na : dn2, "Lower 2", color.new(#2a78d6, 60), 1, plot.style_linebr)
+bgcolor(blocked ? color.new(color.gray, 85) : na, title = "Event blackout")
+plotshape(econHit, "Economic release", shape.diamond, location.top, color.new(color.gray, 0), size = size.tiny)
+// Data-window plots so "Export chart data" carries the exact filter inputs for the Python port.
+plot(dxyUp, "DXY up", display = display.data_window)
+plot(yldUp, "US10Y up", display = display.data_window)
+plot(econHit ? 1 : 0, "Econ release", display = display.data_window)
+
+var table info = table.new(position.top_right, 2, 4, bgcolor = color.new(color.gray, 90))
+if barstate.islast
+    table.cell(info, 0, 0, "mintick")
+    table.cell(info, 1, 0, str.tostring(syminfo.mintick))
+    table.cell(info, 0, 1, "point value")
+    table.cell(info, 1, 1, str.tostring(syminfo.pointvalue))
+    table.cell(info, 0, 2, "events parsed")
+    table.cell(info, 1, 2, str.tostring(evts.size()))
+    table.cell(info, 0, 3, "alerts")
+    table.cell(info, 1, 3, whSecret == "" ? "off (no secret)" : "on")

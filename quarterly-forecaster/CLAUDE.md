@@ -44,10 +44,12 @@ src/forecaster/
   pipeline.py      # runs models, writes JSON snapshots the dashboard reads
   dashboard.py     # Plotly figure builders (palette-validated, light/dark)
   webhook_server.py # FastAPI: TradingView alert -> risk checks -> TAKE/CAUTION/SKIP -> Telegram + SQLite
+  vwap_backtest.py # bar-for-bar Python port of pine/vwap_gold.pine (TV broker-emulator rules)
   model.py         # Forecast contract + block-bootstrap baseline model
   cli.py           # `python -m forecaster`
   sources/         # one adapter per data provider
 app.py             # Streamlit dashboard (reads data/snapshots/*.json only)
+pine/vwap_gold.pine # TradingView v6 strategy; keep in sync with vwap_backtest.py
 scripts/weekly_refresh.sh  # cron job: pipeline + stale backtests, logs in data/logs/
 results/           # committed backtest reports + reference summary (backtest_GSPC.json)
 tests/             # pytest, no network (test_app.py drives app.py with AppTest)
@@ -133,6 +135,15 @@ data/              # API response cache — contents never committed
   price-source symbol (e.g. GC=F for XAUUSD) against its own close at alert
   time, never the TradingView price (spot vs futures basis). The Telegram token
   is in the API URL, so error messages must not include the request URL.
+- **VWAP strategy parity** (`pine/vwap_gold.pine` <-> `vwap_backtest.py`): any
+  logic change goes in both files. The Pine default event list is generated from
+  `FOMC_DECISIONS_NY`; a test checks they match. Execution follows TradingView's
+  broker emulator: fill at the next open, exits can trigger on the fill bar, path
+  open->high->low->close when the high is nearer the open (else low first), gaps
+  fill at the open, and slippage applies to market and stop fills only.
+  `request.economic()` can't block *before* a release; pre-event blocking
+  needs the explicit event list. pandas 3 infers datetime resolution: always
+  `.as_unit("ns")` before `.asi8` (a unit mismatch once blocked 99% of bars).
 - **Injectable I/O**: sources accept a `session` / `downloader` argument so
   tests pass fakes. `load_settings` accepts an `env` dict. Keep it this way.
 - **Tests**: every new module gets a test file. Tests must not touch the network
@@ -165,6 +176,8 @@ streamlit run app.py               # dashboard
 scripts/weekly_refresh.sh          # what cron runs weekly
 python -m forecaster.webhook_server --port 8000   # TradingView webhook (expose via HTTPS)
 python -m forecaster.webhook_server --stats       # outcome stats by verdict
+python -m forecaster.vwap_backtest --pine-events --fred-events   # event list for the Pine input
+python -m forecaster.vwap_backtest XAUUSD_15.csv --compare tv_trades.csv   # port vs Strategy Tester
 ```
 
 (Run from this folder with `PYTHONPATH=src`, or `pip install -e .`.)

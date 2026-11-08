@@ -83,3 +83,48 @@ The server fills in outcomes every 5 minutes while it runs. If it isn't always o
 schedule `python -m forecaster.webhook_server --resolve-outcomes` hourly; yfinance
 keeps 5-minute bars for about 60 days. See how verdicts performed with
 `python -m forecaster.webhook_server --stats`.
+
+## VWAP gold strategy (Pine v6 + Python port)
+
+`pine/vwap_gold.pine` is a TradingView strategy for XAUUSD:
+- session VWAP (resets 18:00 New York) with ±1 and ±2 standard-deviation bands
+- entries on VWAP reclaim or rejection, with volume confirmation
+- DXY and US10Y trend filter
+- entry blackout around listed events
+- ATR stop, R-multiple target, 1% risk sizing and an end-of-day flatten
+- `alert()` JSON in the webhook server's format
+
+`src/forecaster/vwap_backtest.py` is a bar-for-bar port, so you can check it against
+the Strategy Tester.
+
+**Events.** `request.economic()` gives data values, not a release calendar. It can't
+block entries *before* CPI, and FOMC meetings that hold rates don't show up in the
+rate series. So the blackout uses an explicit list: FOMC 2021–2027 is built in. Add
+CPI/PPI release times from FRED and paste the output into the strategy's *Events* box:
+
+```bash
+python -m forecaster.vwap_backtest --pine-events --fred-events > events.txt
+```
+
+**Comparing with TradingView**
+1. Add the strategy to an XAUUSD chart (same symbol and timeframe you'll test, e.g. OANDA:XAUUSD 15m).
+   Set its *Events* input. Note `mintick` and `point value` from the table at the top right.
+2. Export chart data (chart menu → *Export chart data*, ISO or UNIX time). The strategy plots
+   `DXY up`, `US10Y up` and `Econ release` in the data window so the export carries the exact filter values.
+   If those columns are missing from your export, change those plots' `display` to `display.all`.
+3. Strategy Tester → *List of trades* → export.
+4. Run the port with the same settings, e.g.
+   ```bash
+   python -m forecaster.vwap_backtest XAUUSD_15.csv --events-file events.txt \
+       --params '{"mintick": 0.001, "slippage_ticks": 0}' --compare tv_trades.csv --tv-tz America/New_York
+   ```
+   It prints Strategy-Tester-style stats, the share of TradingView trades it reproduces,
+   and the trades it doesn't.
+
+Five years of 15-minute bars is ~120k bars. TradingView only loads as much history as your
+plan allows (Deep Backtesting covers more), and the export only contains loaded bars. Spot
+XAUUSD volume is broker tick volume, so VWAP depends on the data vendor; compare like with like.
+
+**Alerts.** Create one alert on the strategy with *alert() function calls only* and your webhook
+URL. Put the secret in the strategy's *Webhook secret* input; it's visible to anyone you share
+the script with, so keep the script private. Only entries send alerts.
