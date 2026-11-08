@@ -120,12 +120,15 @@ def fred_release_events(
     end: pd.Timestamp,
     releases: tuple[MacroRelease, ...] = MACRO_RELEASES,
     on_error: Callable[[str, Exception], None] | None = None,
+    limit: int = 100,
 ) -> list[Event]:
+    """Release events in [start, end]. `limit` = dates fetched per release
+    (newest first; 100 is ~8 years of monthly releases, raise for history)."""
     out = []
     for rel in releases:
         try:
             info = fred.release_for_series(rel.series_id)
-            for d in fred.release_dates(int(info["id"])):
+            for d in fred.release_dates(int(info["id"]), limit=limit):
                 if _in_window(d, start, end):
                     out.append(Event(d, rel.category, rel.name, rel.impact, "FRED",
                                      detail=info.get("name", "")))

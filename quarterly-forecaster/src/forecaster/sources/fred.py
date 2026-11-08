@@ -60,6 +60,30 @@ class FredClient:
         )
         return s.dropna()
 
+    def get_first_release(self, series_id: str) -> pd.DataFrame:
+        """Point-in-time history: each observation's *initial* published value
+        and the date it was first published (ALFRED `output_type=4`).
+
+        Columns: date (observation period), value, available (first release
+        date). Use this, not get_series, for backtests and model training:
+        get_series returns today's revised values, which weren't known then.
+        """
+        obs = self._get(
+            "series/observations",
+            series_id=series_id,
+            realtime_start="1776-07-04",
+            realtime_end="9999-12-31",
+            output_type=4,
+        )["observations"]
+        df = pd.DataFrame(
+            {
+                "date": pd.to_datetime([o["date"] for o in obs]),
+                "value": pd.to_numeric([o["value"] for o in obs], errors="coerce"),
+                "available": pd.to_datetime([o["realtime_start"] for o in obs]),
+            }
+        )
+        return df.dropna(subset=["value"]).sort_values("date").reset_index(drop=True)
+
     # -- releases ---------------------------------------------------------- #
     def release_for_series(self, series_id: str) -> dict:
         """The release (id, name) a series is published in."""

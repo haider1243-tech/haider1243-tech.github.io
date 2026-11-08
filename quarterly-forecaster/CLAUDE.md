@@ -39,6 +39,7 @@ src/forecaster/
   macro.py         # FRED indicators: YoY, 3-month trend, surprise vs prior trend
   calendar.py      # CPI/PPI/jobs/GDP/FOMC/earnings events, impact tags, risk density per quarter
   news.py          # headlines -> FinBERT sentiment -> daily/weekly index + shock flags
+  forecast.py      # ensemble: HMM regimes + regime/GARCH Monte Carlo + LightGBM quantiles, SHAP
   model.py         # Forecast contract + block-bootstrap baseline model
   cli.py           # `python -m forecaster`
   sources/         # one adapter per data provider
@@ -85,6 +86,20 @@ data/              # API response cache — contents never committed
   market-news endpoint returns only the latest ~100 items, so market history
   builds up only by running regularly. Tests use a fake scorer; never load the
   real model in tests.
+- **No look-ahead (forecast.py) — non-negotiable.** All inputs go through
+  `PointInTimeData.asof(T)`. Macro data uses *first-release* values and their
+  publication dates (`FredClient.get_first_release`, ALFRED output_type=4),
+  never `get_series` (revised values). Regime features come from HMMs refit on
+  expanding windows at completed quarter-ends and are filtered forward-only;
+  smoothed posteriors are only used inside a fit window. LightGBM training rows
+  are purged to targets with date <= T. Any new feature must come with a test
+  that changing post-T data leaves the forecast unchanged
+  (`test_no_lookahead_future_data_changes_nothing`).
+- **Ensemble conventions**: targets are the closes at the ends of the 4 quarters
+  *after* T's quarter. Blend = weighted average of log-return quantiles
+  (default 50/50 MC/LightGBM; MC only if < `min_train_rows`). Drawdown
+  probability comes from the MC paths (start price counts as a peak). HMM
+  fits run single-threaded (threadpoolctl) for bit-for-bit reproducibility.
 - **Injectable I/O**: sources accept a `session` / `downloader` argument so
   tests pass fakes. `load_settings` accepts an `env` dict. Keep it this way.
 - **Tests**: every new module gets a test file. Tests must not touch the network
@@ -110,6 +125,7 @@ python -m forecaster.market_data   # refresh OHLCV cache, print metrics snapshot
 python -m forecaster.macro         # macro indicator snapshot (needs FRED_API_KEY)
 python -m forecaster.calendar      # upcoming events + risk density per quarter
 python -m forecaster.news          # collect + score headlines, print latest index and shocks
+python -m forecaster.forecast SPY  # ensemble forecast (add --asof YYYY-MM-DD for a backtest point)
 ```
 
 (Run from this folder with `PYTHONPATH=src`, or `pip install -e .`.)
@@ -118,7 +134,13 @@ python -m forecaster.news          # collect + score headlines, print latest ind
 
 - `^VIX` is mean-reverting; bootstrapping its log returns ignores that. Give it
   a dedicated model.
-- Macro indicators, calendar risk density and market metrics are computed but
-  not yet used as model inputs.
+- Ensemble weights are fixed (50/50), not calibrated. Build a walk-forward
+  backtest (`ensemble_forecast(data, asof=T)` for past T) that scores 10–90
+  coverage and pinball loss vs the bootstrap baseline, and sets weights from it.
+- LightGBM has few *independent* samples (targets overlap by up to 4
+  quarters); on synthetic data it gives pure-noise features non-zero SHAP.
+  Needs stronger regularisation / feature pruning, validated by the backtest.
+- News sentiment only exists from when collection started; it's NaN for most
+  training rows until history accumulates.
 - `GDP` is nominal; consider `GDPC1` (real GDP) for growth signals.
 - Add a backtest module that scores historical forecast calibration.
