@@ -30,11 +30,25 @@ from forecaster.config import PROJECT_ROOT, load_settings  # noqa: E402
 st.set_page_config(page_title="Forecaster", page_icon="📈", layout="centered", initial_sidebar_state="collapsed")
 
 TABS = {"week": "This Week", "calendar": "Calendar", "gold": "Gold VWAP", "portfolio": "Portfolio",
-        "reports": "Reports"}
-ICONS = ["📊", "📅", "🥇", "💼", "📄"]
+        "reports": "Reports", "status": "Status"}
+ICONS = ["📊", "📅", "🥇", "💼", "📄", "🚦"]
 PAL = viz.PALETTES["dark"]
 STATUS = {"good": "#0ca30c", "warning": "#fab219", "serious": "#ec835a", "critical": "#d03b3b"}
 settings = load_settings()
+
+
+@st.cache_resource(show_spinner=False)
+def _status_check_on_start() -> bool:
+    """Once per app (server) start: run the build check in the background -> STATUS.md."""
+    from forecaster import project_status
+
+    try:
+        return project_status.start_background(settings.cache_dir)
+    except Exception:  # never block the app on it
+        return False
+
+
+_status_check_on_start()
 
 # --------------------------------------------------------------------------- #
 # Head tags (PWA) + mobile CSS
@@ -527,6 +541,87 @@ def tab_reports() -> None:
         st.markdown(r["md"].read_text())
 
 
+STATE_COLOR = {"built": "good", "failing": "warning", "missing": "critical", "unchecked": "serious"}
+
+
+def tab_status() -> None:
+    from forecaster import project_status as ps
+
+    header("Status")
+    s = ps.build(settings.cache_dir)
+    running = ps.running(settings.cache_dir)
+    st.html(f"""<div class="qf-card" style="border-color:{PAL['s1']}">
+      <div class="qf-muted">Next step</div>
+      <div style="font-size:1rem;font-weight:600;margin-top:2px">{esc(s['next_step'])}</div></div>""")
+
+    st.markdown(f"**Phase tracker** · Phase {s['phase']}: {ps.PHASES[s['phase'] - 1]}")
+    out = []
+    for g in s["gates"]:
+        cur = g["phase"] == s["phase"]
+        col = PAL["s1"] if cur else STATUS["good"] if g["passed"] else "#383835"
+        word = "current" if cur else "passed" if g["passed"] else ("your call" if g["phase"] == 5 else "not yet")
+        bg = "background:rgba(57,135,229,0.14);" if cur else ""
+        out.append(f"""<div class="qf-item" style="border-left-color:{col};{bg}">
+          <div style="min-width:0"><div class="t">{ps.gate_icon(g, s['phase'])} {g['phase']} · {esc(g['name'])}</div>
+          <div class="s">Gate: {esc(g['gate'])}</div><div class="s" style="white-space:normal">{esc(g['evidence'])}</div></div>
+          <div class="r"><span class="qf-badge" style="background:{col};color:{'#fff' if cur else '#0b0b0b'}">{word}</span></div></div>""")
+    st.html("".join(out))
+
+    t = s["tests"]
+    n_ok = sum(m["state"] == "built" for m in s["modules"])
+    if running:
+        when = "checking now (about a minute)…"
+    elif t and not t.get("note"):
+        when = (f"{t['passed']} tests passed" + (f", {t['failed'] + t['errors']} failing" if t["failed"] + t["errors"] else "")
+                + f" · checked {ad.ago(pd.Timestamp(s['checked_at']), now_utc())}")
+    else:
+        when = (t or {}).get("note") or "not checked yet"
+    st.markdown(f"**Build progress** · {n_ok}/{len(s['modules'])} modules ✅")
+    st.caption(when)
+    st.html('<div class="qf-row">' + "".join(
+        f'<div class="qf-chip" style="flex:1 1 150px;border-left:3px solid {STATUS[STATE_COLOR[m["state"]]]}">'
+        f'<div class="v" style="font-size:0.9rem">{ps.ICON[m["state"]]} {esc(m["name"])}</div>'
+        f'<div class="d">{esc(m["detail"])}</div></div>' for m in s["modules"]) + "</div>")
+    if t and t.get("failures"):
+        with st.expander(f"Failing tests ({len(t['failures'])})"):
+            st.code("\n".join(t["failures"][:30]), language=None)
+    if st.button("Re-check now (runs every test)", key="recheck", width="stretch", disabled=running):
+        with st.spinner("Importing modules and running the test suite…"):
+            ps.refresh(settings.cache_dir)
+        st.rerun()
+
+    st.markdown("**Data health**")
+    now = now_utc()
+    st.html("".join(f"""<div class="qf-item" style="border-left-color:{STATUS['good'] if d['ok'] else STATUS['critical']}">
+      <div style="min-width:0"><div class="t">{'✅' if d['ok'] else '🔴'} {esc(d['label'])}</div>
+      <div class="s" style="white-space:normal">{esc(d['message'])}</div></div>
+      <div class="r">{esc(ad.ago(pd.Timestamp(d['last_success']) if d['last_success'] else None, now))}</div></div>"""
+                    for d in s["data"]))
+    keys = s["keys"]
+    st.html('<div class="qf-muted" style="margin:-2px 0 10px">API keys in .env (values never shown): ' + " · ".join(
+        f"{esc(k)} {'✅' if v else '🔴 missing'}" for k, v in keys.items() if k in ps.KEYS) + "<br>Demo phase: "
+        + " · ".join(f"{esc(k)} {'✅' if v else '— not set'}" for k, v in keys.items() if k in ps.DEMO_KEYS) + "</div>")
+
+    st.markdown("**Model health**")
+    if not s["backtests"]:
+        st.caption("No backtest yet.")
+    out = []
+    for b in s["backtests"]:
+        col = STATUS["good"] if b["beats_baseline"] else STATUS["warning"]
+        out.append(f"""<div class="qf-item" style="border-left-color:{col}">
+          <div style="min-width:0"><div class="t">{esc(b['ticker'])}{' (reference run)' if b['reference'] else ''} · {esc(b['period'])}</div>
+          <div class="s">P10–P90 coverage {b['coverage']:.0%} (target 80%) · hit rate {b['hit_rate']:.0%}</div>
+          <div class="s">Last run {esc(str(b['run_at'])[:10])}</div></div>
+          <div class="r"><span class="qf-badge" style="background:{col}">{'beats baseline' if b['beats_baseline'] else 'no edge'}</span></div></div>""")
+    st.html("".join(out))
+    j, d = s["journal"], s["demo"]
+    st.caption(f"Journal: {j['alerts']} alerts, {j['journaled']} with a resolved outcome. Practice account: "
+               f"{d['filled']} filled orders, {d['days']} days of P&L history"
+               + ("" if d["pnl"] is None else f", P&L {d['pnl']:+,.2f}") + ". Nothing here ever turns on live trading.")
+    st.caption("Also written to STATUS.md on every app start and Sunday job; the summary goes to Telegram with "
+               "the weekly report.")
+
+
 # --------------------------------------------------------------------------- #
 # Navigation (bottom tab bar, synced with ?tab=)
 # --------------------------------------------------------------------------- #
@@ -542,6 +637,6 @@ if st.query_params.get("tab") != tab:
     st.query_params["tab"] = tab
 
 {"week": tab_week, "calendar": tab_calendar, "gold": tab_gold, "portfolio": tab_portfolio,
- "reports": tab_reports}[tab]()
+ "reports": tab_reports, "status": tab_status}[tab]()
 if tab not in ("portfolio",):
     settings_footer()

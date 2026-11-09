@@ -90,6 +90,24 @@ def _test_hash():
     return _TEST_HASH
 
 
+_REAL_CONFIG_KEYS = ("FRED_API_KEY", "FINNHUB_API_KEY", "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "WEBHOOK_SECRET",
+                     "WEBHOOK_ALLOWED_IPS", "OANDA_API_TOKEN", "OANDA_ACCOUNT_ID", "OANDA_ENVIRONMENT",
+                     "LIVE_TRADING", "EXECUTION_ENABLED", "KILL_SWITCH", "FORECASTER_CACHE_DIR")
+
+
+@pytest.fixture(autouse=True)
+def _isolate_from_real_config(monkeypatch, tmp_path_factory):
+    """Tests must behave the same on a machine with a real .env / portfolio.yaml: never load
+    the project's .env into os.environ, drop real keys, and point PORTFOLIO_FILE nowhere."""
+    import forecaster.config as cfg
+    import forecaster.portfolio as pf
+
+    monkeypatch.setattr(cfg, "load_dotenv", lambda *a, **k: False)
+    for k in _REAL_CONFIG_KEYS:
+        monkeypatch.delenv(k, raising=False)
+    monkeypatch.setattr(pf, "PORTFOLIO_FILE", tmp_path_factory.getbasetemp() / "no-portfolio.yaml")
+
+
 @pytest.fixture(autouse=True)
 def _dashboard_password(monkeypatch):
     monkeypatch.setenv("APP_PASSWORD_HASH", _test_hash())

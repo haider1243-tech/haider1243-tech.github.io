@@ -37,6 +37,19 @@ Bottom tabs:
 - **Portfolio**: holdings in CAD, P&L, allocation, the portfolio forecast range, and the
   contribution planner.
 - **Reports**: every Sunday report, newest first, readable in the app (PDF download too).
+- **Status**: where the project stands and what to do next.
+  - **Build progress**: each module imported and its tests run (✅ built / ⚠️ tests failing / ❌ missing).
+  - **Data health**: last refresh of prices, FRED macro, news and calendar, flagged red if older than 24 h
+    or if a key is missing from `.env` (keys are shown as set/missing, never their values).
+  - **Model health**: latest backtest coverage, hit rate, beats-baseline and run date.
+  - **Phase tracker**: 1 Build → 2 Validate → 3 Journal → 4 Demo → 5 Live, each gate checked automatically
+    (tests pass · backtest beats baseline · 30+ journaled alerts · 2+ months of practice P&L), current phase highlighted.
+  - **Next step**: one line.
+
+  The same summary is written to `STATUS.md` (gitignored; `data/STATUS.md` under Docker) whenever the
+  app starts and on the Sunday job, and goes to Telegram with the weekly report.
+  `python -m forecaster.project_status` runs it by hand (`--quick` skips the tests, `--send` sends it).
+  Nothing in it ever turns on live trading: reaching Phase 5 only tells you the gates passed.
 
 Every page shows **Last updated** times, and a **red banner** when a data source's last refresh
 failed or its data is older than 24 h (8 days for the weekly forecasts).

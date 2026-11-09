@@ -369,6 +369,13 @@ def main(argv: list[str] | None = None) -> int:  # pragma: no cover - long-runni
 
         threading.Thread(target=lambda: wait_for_dashboard(url) and webbrowser.open(url), daemon=True).start()
     try:
+        from forecaster import project_status
+        from forecaster.config import load_settings
+
+        project_status.start_background(load_settings().cache_dir, root)   # refreshes STATUS.md
+    except Exception as exc:
+        log.warning("status check not started: %s", exc)
+    try:
         sup.run(stop_event=lambda: stop["flag"])
     finally:
         if running_pid(pid_file) == os.getpid():

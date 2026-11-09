@@ -545,6 +545,7 @@ def main(argv: list[str] | None = None) -> int:  # pragma: no cover
     ap.add_argument("--no-refresh", action="store_true", help="use cached data/snapshots as they are")
     ap.add_argument("--no-send", action="store_true", help="don't send the Telegram summary")
     ap.add_argument("--no-pdf", action="store_true")
+    ap.add_argument("--no-status", action="store_true", help="skip the project status check (STATUS.md)")
     ap.add_argument("--out", default=str(REPORTS_DIR))
     args = ap.parse_args(argv)
     warn = lambda m: print(f"[warn] {m}", file=sys.stderr)  # noqa: E731
@@ -567,10 +568,24 @@ def main(argv: list[str] | None = None) -> int:  # pragma: no cover
     paths = save_report(report, Path(args.out), pdf=not args.no_pdf)
     for k, p in paths.items():
         print(f"{k:>8}: {p}")
+    status = None
+    if not args.no_status:
+        from forecaster import project_status
+
+        try:   # imports + full test run, then STATUS.md
+            status = project_status.refresh(settings.cache_dir)
+            print("  status:", project_status.STATUS_MD)
+        except Exception as exc:
+            warn(f"project status: {exc}")
     if not args.no_send:
-        ok, err = TelegramNotifier(settings.telegram_bot_token, settings.telegram_chat_id).send(
-            summary_text(report, paths["markdown"]))
+        tg = TelegramNotifier(settings.telegram_bot_token, settings.telegram_chat_id)
+        ok, err = tg.send(summary_text(report, paths["markdown"]))
         print("telegram:", "sent" if ok else f"not sent ({err})")
+        if status is not None:
+            from forecaster.project_status import telegram_text
+
+            ok, err = tg.send(telegram_text(status))
+            print("telegram status:", "sent" if ok else f"not sent ({err})")
     return 0
 
 

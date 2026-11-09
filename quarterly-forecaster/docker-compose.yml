@@ -12,6 +12,7 @@ x-app: &app
   env_file: .env
   environment:
     FORECASTER_CACHE_DIR: /app/data
+    FORECASTER_STATUS_MD: /app/data/STATUS.md   # project status lands in ./data on the host
   volumes:
     - ./data:/app/data
     - ./reports:/app/reports

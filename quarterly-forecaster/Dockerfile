@@ -22,6 +22,7 @@ COPY src ./src
 COPY results ./results
 COPY pine ./pine
 COPY scripts ./scripts
+COPY tests ./tests
 RUN pip install --no-deps -e . \
     && useradd --create-home --uid 10001 app \
     && mkdir -p data reports logs \

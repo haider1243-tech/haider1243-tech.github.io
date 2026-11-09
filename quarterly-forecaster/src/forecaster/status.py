@@ -22,6 +22,8 @@ SOURCES: dict[str, tuple[str, pd.Timedelta]] = {
     "prices": ("Prices", pd.Timedelta(hours=24)),
     "news": ("News", pd.Timedelta(hours=24)),
     "market": ("Macro & events", pd.Timedelta(hours=24)),
+    "macro": ("FRED macro", pd.Timedelta(hours=24)),
+    "calendar": ("Calendar", pd.Timedelta(hours=24)),
     "portfolio": ("Portfolio", pd.Timedelta(hours=24)),
     "forecasts": ("Forecasts", pd.Timedelta(days=8)),
 }

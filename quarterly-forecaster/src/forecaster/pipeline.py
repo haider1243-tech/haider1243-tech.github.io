@@ -314,6 +314,17 @@ def refresh_market(settings: Settings, warn: Warn = print, score_news: bool = Tr
     watch = load_watchlist(PROJECT_ROOT / "watchlist.yaml")
     events = build_calendar(today, fred, fh, watch, on_error=lambda s, e: w(f"calendar {s}: {e}"))
     density = risk_density(events, today)
+    from forecaster import status as st
+
+    fred_errs = [m for m in warnings if m.startswith("FRED ")]
+    if fred is None:
+        st.record(settings.cache_dir, "macro", False, "FRED_API_KEY missing")
+    else:
+        st.record(settings.cache_dir, "macro", bool(hist) and not fred_errs,
+                  "; ".join(fred_errs)[:300] or ("no macro series returned" if not hist else None))
+    cal_errs = [m for m in warnings if m.startswith("calendar ")]
+    st.record(settings.cache_dir, "calendar", bool(events) and not cal_errs,
+              "; ".join(cal_errs)[:300] or ("no events" if not events else None))
 
     frame = daily = None
     store_path = settings.cache_dir / "news.sqlite"

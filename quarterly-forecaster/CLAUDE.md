@@ -52,12 +52,13 @@ src/forecaster/
   monitor.py       # 24/7 APScheduler checks -> Telegram (deduped) + /status bot; writes prices.json
   status.py        # data health (data/status.json): last success/failure per source -> red banner
   appdata.py       # pure helpers for the app tabs (outlook lines, calendar, gold journal, reports)
+  project_status.py # Status tab + STATUS.md: module imports + pytest, data/key health, backtests, phase gates
   launcher.py      # supervises monitor + webhook + dashboard (+ cloudflared) for start.bat/start.sh
   auth.py          # dashboard password (PBKDF2, ':'-separated hash) + login lockouts
   model.py         # Forecast contract + block-bootstrap baseline model
   cli.py           # `python -m forecaster`
   sources/         # one adapter per data provider
-app.py             # mobile-first Streamlit app, 5 bottom tabs (reads data/snapshots/*.json only)
+app.py             # mobile-first Streamlit app, 6 bottom tabs (reads data/snapshots/*.json only)
 static/            # PWA manifest + icons (served at /app/static/; regenerate: scripts/make_icons.py)
 start.bat, stop.bat, setup.bat, scripts/windows/   # Windows one-click launcher, shortcuts, auto-start
 start.sh           # same launcher on Linux/macOS
@@ -159,6 +160,17 @@ data/              # API response cache — contents never committed
 - **Schedule** (`monitor.py`): checks + prices/news every 15 min around the clock;
   macro/events refresh 06:15 + 18:15 NY; forecast rebuild + weekly report Sunday
   18:00 `America/Edmonton` (MT).
+- **Project status** (`project_status.py`): the build check (import every module + run
+  pytest in a subprocess with a scrubbed env and `FORECASTER_STATUS_CHILD=1`) runs on
+  launcher/app start (skipped inside pytest, while one runs, or < 10 min after the last),
+  on the Sunday weekly report, and on "Re-check now"; cached in data/project_status.json.
+  Everything else is recomputed per view. Phases are strictly ordered; gates: all tests
+  pass; primary backtest (own SPY/^GSPC run, else reference) `beats_baseline`; 30+ alerts
+  with a resolved outcome; practice fills + daily NAV spanning 60+ days. Keys are only
+  ever reported set/missing; tests assert no value reaches STATUS.md, JSON or Telegram.
+  It never changes LIVE_TRADING. Add new modules to `MODULES` (and `TEST_FILES` if the
+  test file isn't `test_<module>.py`). `conftest` hides the real .env and portfolio.yaml
+  from every test, so results match between machines.
 - **Launcher** (`launcher.py`): binds everything to 127.0.0.1, restarts crashed services
   with backoff, one instance (data/launcher.pid). The webhook gets `--trust-proxy` only
   when cloudflared runs. Windows scripts must keep CRLF line endings (`.gitattributes`).
@@ -270,6 +282,7 @@ docker compose up -d                             # 24/7 private deployment (DEPL
 python -m forecaster.launcher --open             # all services without Docker (start.bat / start.sh)
 python -m forecaster.launcher --status|--stop|--check
 python -m forecaster.auth --write-env            # set the dashboard password in .env
+python -m forecaster.project_status [--quick] [--send]   # STATUS.md: build, data, model, phase, next step
 ```
 
 (Run from this folder with `PYTHONPATH=src`, or `pip install -e .`.)

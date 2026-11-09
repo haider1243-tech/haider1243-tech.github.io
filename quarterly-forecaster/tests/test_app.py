@@ -85,9 +85,9 @@ def _go(at, tab):
 
 
 def test_bottom_tabs_and_last_updated_on_every_tab(app):
-    assert app.radio(key="tab").options == ["Week", "Calendar", "Gold", "Portfolio", "Reports"]
+    assert app.radio(key="tab").options == ["Week", "Calendar", "Gold", "Portfolio", "Reports", "Status"]
     for tab, title in (("week", "This Week"), ("calendar", "Calendar"), ("gold", "Gold VWAP"),
-                       ("portfolio", "Portfolio"), ("reports", "Reports")):
+                       ("portfolio", "Portfolio"), ("reports", "Reports"), ("status", "Status")):
         at = _go(app, tab)
         txt = _text(at)
         assert f"### {title}" in txt, tab
@@ -185,3 +185,35 @@ def test_refresh_button_calls_pipeline(app, monkeypatch):
     app.button(key="refresh").click().run()
     assert not app.exception, app.exception
     assert calls == [{"forecasts": False}]
+
+
+def test_status_tab(app, monkeypatch):
+    from forecaster import project_status as ps
+
+    at = _go(app, "status")
+    txt = _text(at)
+    assert "Next step" in txt and "Re-check now" in txt                     # no build check cached yet
+    assert "Phase tracker" in txt and "1 · Build" in txt and "5 · Live" in txt and "current" in txt
+    assert "market_data" in txt and "weekly_report" in txt and "not checked yet" in txt
+    assert "Data health" in txt and "FRED macro" in txt and "FRED_API_KEY missing from .env" in txt
+    assert "Model health" in txt and "^GSPC (reference run)" in txt and "no edge" in txt
+    assert "Journal: 3 alerts, 3 with a resolved outcome" in txt
+    calls = []
+
+    def fake_refresh(cache_dir, **kw):
+        calls.append(cache_dir)
+        p = ps.status_json(cache_dir)
+        p.write_text(json.dumps({"checked_at": NOW.isoformat(), "imports": {m: None for m in ps.MODULES},
+                                 "tests": {"ran_at": NOW.isoformat(), "returncode": 0, "passed": 99, "failed": 0,
+                                           "errors": 0, "skipped": 0, "seconds": 1.0, "note": "", "failures": [],
+                                           "per_file": {f"test_{m}" if m != "webhook_server" else "test_webhook":
+                                                        {"passed": 1, "failed": 0, "errors": 0, "skipped": 0}
+                                                        for m in ps.MODULES}}}))
+
+    monkeypatch.setattr(ps, "refresh", fake_refresh)
+    at.button(key="recheck").click().run()
+    assert not at.exception, at.exception
+    txt = _text(at)
+    assert calls and "99 tests passed" in txt and "12/12 modules ✅" in txt
+    assert "Add FINNHUB_API_KEY to .env" in txt or "Add FRED_API_KEY to .env" in txt
+    ps.status_json(calls[0]).unlink()
