@@ -19,6 +19,21 @@ Canadian holder would experience it. ^VIX, ^TNX and the dollar index aren't mone
 points or percent. Trading prices for orders (e.g. XAU_USD on OANDA) stay in their quote
 currency, with the CAD equivalent shown next to them.
 
+## Run it 24/7, privately
+
+`docker compose up -d` runs four services: the dashboard (password-protected, loopback only, reached
+from your phone via Tailscale), the TradingView webhook (only `/tv-alert`, through a Cloudflare
+Tunnel), the 24/7 monitor (Telegram alerts and `/status`), and cloudflared. Step-by-step setup,
+including Tailscale and Cloudflare Tunnel, is in **[DEPLOY.md](DEPLOY.md)**.
+
+The monitor checks every 15 minutes in market hours and hourly otherwise. Each alert is sent once,
+with a short reason:
+- warnings 24 h and 1 h before CPI, PPI, jobs and FOMC
+- VIX spikes of 20% or more
+- gold beyond 2 standard deviations from its session VWAP
+- regime changes
+- news-sentiment shocks
+
 ## Setup
 
 ```bash

@@ -26,3 +26,9 @@ portfolio.yaml
 
 # Weekly reports contain portfolio data — never commit
 reports/
+
+# Deployment secrets / runtime
+cloudflared/*.json
+cloudflared/config.yml
+cloudflared/cert.pem
+logs/

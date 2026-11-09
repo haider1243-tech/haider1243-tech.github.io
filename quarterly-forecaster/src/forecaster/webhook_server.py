@@ -37,6 +37,7 @@ import hmac
 import html
 import json
 import logging
+import os
 import sqlite3
 from contextlib import asynccontextmanager, closing
 from dataclasses import asdict, dataclass, field
@@ -622,18 +623,48 @@ def format_message(alert: Alert, t: pd.Timestamp, verdict: str, reasons: list[st
 # --------------------------------------------------------------------------- #
 
 def _client_ip(request: Request, trust_proxy: bool) -> str:
+    """Real client IP. Behind Cloudflare Tunnel the connection comes from cloudflared,
+    so the visitor's address is in CF-Connecting-IP (only trusted with --trust-proxy,
+    i.e. when the server is reachable through the tunnel alone)."""
     if trust_proxy:
+        cf = request.headers.get("cf-connecting-ip")
+        if cf:
+            return cf.strip()
         fwd = request.headers.get("x-forwarded-for")
         if fwd:
             return fwd.split(",")[0].strip()
     return request.client.host if request.client else ""
 
 
+class RateLimiter:
+    """Sliding-window limits per client IP and in total. In-memory, single process."""
+
+    def __init__(self, per_ip: int = 30, total: int = 120, window_s: float = 60.0) -> None:
+        self.per_ip, self.total, self.window_s = per_ip, total, window_s
+        self._hits: dict[str, list[float]] = {}
+        self._all: list[float] = []
+
+    def allow(self, key: str, now: float) -> bool:
+        cut = now - self.window_s
+        self._all = [t for t in self._all if t > cut]
+        mine = [t for t in self._hits.get(key, []) if t > cut]
+        if len(mine) >= self.per_ip or len(self._all) >= self.total:
+            self._hits[key] = mine
+            return False
+        mine.append(now)
+        self._hits[key] = mine
+        self._all.append(now)
+        if len(self._hits) > 10_000:           # bound memory under a flood of distinct IPs
+            self._hits = {k: v for k, v in self._hits.items() if v and v[-1] > cut}
+        return True
+
+
 def create_app(settings: Settings | None = None, store: AlertStore | None = None,
                ctx: Context | None = None, notifier: TelegramNotifier | None = None,
                cfg: RuleConfig = RuleConfig(), clock: Callable[[], pd.Timestamp] | None = None,
                price_fetcher: PriceFetcher | None = None, resolve_every_s: float | None = 300.0,
-               trust_proxy: bool = False, executor: Any = None) -> FastAPI:
+               trust_proxy: bool = False, executor: Any = None,
+               rate_limiter: RateLimiter | None = None) -> FastAPI:
     """`executor`: optional forecaster.execution.Executor. It gets every new alert and
     places an order only for TAKE verdicts that pass its own hard limits."""
     settings = settings or load_settings()
@@ -642,6 +673,8 @@ def create_app(settings: Settings | None = None, store: AlertStore | None = None
     notifier = notifier or TelegramNotifier(settings.telegram_bot_token, settings.telegram_chat_id)
     clock = clock or (lambda: pd.Timestamp.now(tz="UTC"))
     fetch = price_fetcher or yf_intraday
+    limiter = rate_limiter or RateLimiter(int(os.environ.get("WEBHOOK_RATE_PER_IP", 30)),
+                                          int(os.environ.get("WEBHOOK_RATE_TOTAL", 120)))
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
@@ -676,9 +709,13 @@ def create_app(settings: Settings | None = None, store: AlertStore | None = None
 
     @app.post("/tv-alert")
     async def tv_alert(request: Request, background: BackgroundTasks) -> dict:
+        ip = _client_ip(request, trust_proxy)
+        # rate limit before anything else, so the secret can't be brute-forced quickly
+        if not limiter.allow(ip or "unknown", clock().timestamp()):
+            raise HTTPException(429, "too many requests")
         if not settings.webhook_secret:
             raise HTTPException(503, "WEBHOOK_SECRET is not configured")
-        if settings.webhook_allowed_ips and _client_ip(request, trust_proxy) not in settings.webhook_allowed_ips:
+        if settings.webhook_allowed_ips and ip not in settings.webhook_allowed_ips:
             raise HTTPException(403, "source IP not allowed")
         if int(request.headers.get("content-length") or 0) > MAX_BODY_BYTES:
             raise HTTPException(413, "body too large")
@@ -739,7 +776,11 @@ def main(argv: list[str] | None = None) -> int:  # pragma: no cover
     ap.add_argument("--resolve-outcomes", action="store_true", help="fill due outcomes once and exit")
     ap.add_argument("--stats", action="store_true", help="print outcome stats by verdict and exit")
     args = ap.parse_args(argv)
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    from forecaster.config import PROJECT_ROOT
+    from forecaster.monitor import setup_logging
+
+    # rotating file logs; also silences httpx INFO lines, which would print the Telegram token URL
+    setup_logging(PROJECT_ROOT / "logs", "webhook")
 
     settings = load_settings()
     store = AlertStore(Path(settings.cache_dir) / "alerts.sqlite")
@@ -761,8 +802,9 @@ def main(argv: list[str] | None = None) -> int:  # pragma: no cover
         executor = Executor(xcfg, OrderStore(Path(settings.cache_dir) / "alerts.sqlite"),
                             notify=lambda text: notifier.send(html.escape(text)))
         log.warning("order execution ENABLED on OANDA %s", xcfg.environment.upper())
+    # log_config=None: uvicorn's own loggers propagate to the root handlers (logs/webhook.log + stdout)
     uvicorn.run(create_app(settings, store, trust_proxy=args.trust_proxy, executor=executor),
-                host=args.host, port=args.port)
+                host=args.host, port=args.port, log_config=None)
     return 0
 
 

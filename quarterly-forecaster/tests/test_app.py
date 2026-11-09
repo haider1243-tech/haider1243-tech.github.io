@@ -2,6 +2,8 @@
 from pathlib import Path
 
 import pytest
+
+from conftest import authed_app
 from streamlit.testing.v1 import AppTest
 
 from app_fixtures import write_fixture_snapshots
@@ -20,7 +22,7 @@ def cache_dir(tmp_path_factory):
 @pytest.fixture
 def app(cache_dir, monkeypatch):
     monkeypatch.setenv("FORECASTER_CACHE_DIR", str(cache_dir))
-    at = AppTest.from_file(APP, default_timeout=60)
+    at = authed_app(APP, default_timeout=60)
     at.run()
     assert not at.exception, at.exception
     return at
@@ -96,7 +98,7 @@ def test_sentiment_page(app):
 
 def test_missing_snapshots_degrade_gracefully(tmp_path, monkeypatch):
     monkeypatch.setenv("FORECASTER_CACHE_DIR", str(tmp_path))
-    at = AppTest.from_file(APP, default_timeout=60).run()
+    at = authed_app(APP, default_timeout=60).run()
     assert not at.exception, at.exception
     for page in ("Forecast", "Macro & events", "Sentiment & news"):
         at.sidebar.radio(key="page").set_value(page).run()

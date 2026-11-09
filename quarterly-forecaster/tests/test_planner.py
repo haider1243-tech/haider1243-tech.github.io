@@ -5,6 +5,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from conftest import authed_app
+
 from forecaster.pipeline import write_json
 from forecaster.planner import (
     PlannerConfig, PlannerError, check_instrument, months_to_target, normalise_targets, plan_contribution,
@@ -194,7 +196,7 @@ def app_with_portfolio(tmp_path, monkeypatch):
                "targets": {"XEQT.TO": 60, "ZAG.TO": 20, "VFV.TO": 20}},
                "forecast": [{"quarter": "2027Q1", "prob_drawdown": 0.12}]})
     monkeypatch.setenv("FORECASTER_CACHE_DIR", str(tmp_path))
-    at = AppTest.from_file(str(Path(__file__).resolve().parents[1] / "app.py"), default_timeout=60).run()
+    at = authed_app(str(Path(__file__).resolve().parents[1] / "app.py"), default_timeout=60).run()
     at.sidebar.radio(key="page").set_value("Contribution planner").run()
     assert not at.exception, at.exception
     return at, snaps

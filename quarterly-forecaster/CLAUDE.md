@@ -49,6 +49,8 @@ src/forecaster/
   portfolio.py     # portfolio.yaml -> CAD value, P&L, allocation, beta/vol, joint-bootstrap forecast
   weekly_report.py # Sunday report: Markdown + PDF in reports/ (gitignored), Telegram summary
   planner.py       # buy-only contribution split toward targets + timing flags; never leverage/options
+  monitor.py       # 24/7 APScheduler checks -> Telegram (deduped) + /status long-polling bot
+  auth.py          # dashboard password (PBKDF2, ':'-separated hash) + login lockouts
   model.py         # Forecast contract + block-bootstrap baseline model
   cli.py           # `python -m forecaster`
   sources/         # one adapter per data provider
@@ -57,6 +59,8 @@ pine/vwap_gold.pine # TradingView v6 strategy; keep in sync with vwap_backtest.p
 scripts/weekly_refresh.sh  # cron job: pipeline + stale backtests, logs in data/logs/
 scripts/weekly_report.sh   # Sunday cron job: weekly_report (refresh, md+pdf, Telegram)
 results/           # committed backtest reports + reference summary (backtest_GSPC.json)
+Dockerfile, docker-compose.yml, DEPLOY.md   # private 24/7 deployment (see Deployment rules)
+cloudflared/config.example.yml  # tunnel ingress: ONLY ^/tv-alert$, everything else 404
 tests/             # pytest, no network (test_app.py drives app.py with AppTest)
 data/              # API response cache — contents never committed
 ```
@@ -193,6 +197,19 @@ data/              # API response cache — contents never committed
   ordinary bond funds). Buys are >= 0 and sum exactly to the contribution
   (water-fill least squares). Risk flags only ever suggest splitting a buy across
   weeks, never skipping or hedging, and say the drawdown probabilities run high.
+- **Deployment privacy** (non-negotiable, `test_deploy.py` enforces it): the
+  dashboard is published only as `127.0.0.1:8501` (Tailscale `serve`, never
+  `funnel`). No other service publishes a port. The tunnel ingress is exactly
+  `^/tv-alert$` -> webhook, then `http_status:404`. The webhook trusts
+  `CF-Connecting-IP` only with `--trust-proxy` (it's reachable only via cloudflared)
+  and rate-limits before checking the secret. The dashboard fails closed without
+  `APP_PASSWORD_HASH`. Hashes use ':' separators, because compose expands `$`
+  in env files. Telegram commands come in by long-polling, answered only in
+  `TELEGRAM_CHAT_ID`. httpx INFO logs contain the bot-token URL: always use
+  `monitor.setup_logging` (which silences them) in services. `init: true` on app
+  services (PID 1 otherwise ignores SIGTERM). Monitor alerts are claimed by key in
+  `data/monitor.sqlite` before sending (once ever) and unclaimed if Telegram fails.
+  App tests log in via `conftest.authed_app`.
 - **Injectable I/O**: sources accept a `session` / `downloader` argument so
   tests pass fakes. `load_settings` accepts an `env` dict. Keep it this way.
 - **Tests**: every new module gets a test file. Tests must not touch the network
@@ -230,6 +247,9 @@ python -m forecaster.vwap_backtest --pine-events --fred-events   # event list fo
 python -m forecaster.vwap_backtest XAUUSD_15.csv --compare tv_trades.csv   # port vs Strategy Tester
 python -m forecaster.execution --status          # OANDA env, limits, kill switch, recent orders
 python -m forecaster.execution --kill --flatten  # stop all orders and close positions
+python -m forecaster.auth                        # make APP_PASSWORD_HASH for .env
+python -m forecaster.monitor --once              # run the monitor checks once
+docker compose up -d                             # 24/7 private deployment (DEPLOY.md)
 ```
 
 (Run from this folder with `PYTHONPATH=src`, or `pip install -e .`.)

@@ -1,0 +1,76 @@
+# Private 24/7 deployment. Nothing here is reachable from the internet except
+# https://<your-hostname>/tv-alert, via the Cloudflare Tunnel (outbound-only).
+#   dashboard   Streamlit, published on the host's 127.0.0.1:8501 only (reach it via Tailscale)
+#   webhook     TradingView webhook, no published port; only cloudflared can reach it
+#   monitor     APScheduler checks + daily refresh + Sunday report + Telegram /status
+#   cloudflared Cloudflare Tunnel; its config routes ONLY ^/tv-alert$ (everything else -> 404)
+# Setup: see DEPLOY.md.
+
+x-app: &app
+  build: .
+  image: quarterly-forecaster:local
+  env_file: .env
+  environment:
+    FORECASTER_CACHE_DIR: /app/data
+  volumes:
+    - ./data:/app/data
+    - ./reports:/app/reports
+    - ./logs:/app/logs
+    - ./.env:/app/.env:ro                 # execution.py reads LIVE_TRADING from the file itself
+    - ./watchlist.yaml:/app/watchlist.yaml:ro
+    - ./portfolio.yaml:/app/portfolio.yaml:ro   # create it first: cp portfolio.example.yaml portfolio.yaml
+  restart: unless-stopped                 # restarts on crash and after reboot (Docker starts at boot)
+  init: true                              # PID 1 = tini: forwards SIGTERM so `docker compose stop` is clean
+  security_opt:
+    - no-new-privileges:true
+  logging:
+    driver: json-file
+    options: {max-size: "10m", max-file: "5"}
+
+services:
+  dashboard:
+    <<: *app
+    command: ["bash", "scripts/run_logged.sh", "dashboard", "streamlit", "run", "app.py",
+              "--server.address", "0.0.0.0", "--server.port", "8501", "--server.headless", "true",
+              "--browser.gatherUsageStats", "false"]
+    ports:
+      - "127.0.0.1:8501:8501"              # host loopback ONLY: never 0.0.0.0, never opened in a firewall
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8501/_stcore/health', timeout=5)"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+
+  webhook:
+    <<: *app
+    command: ["python", "-m", "forecaster.webhook_server", "--host", "0.0.0.0", "--port", "8000", "--trust-proxy"]
+    expose: ["8000"]                       # internal network only: no `ports:`
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5)"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+
+  monitor:
+    <<: *app
+    command: ["python", "-m", "forecaster.monitor"]
+    healthcheck:
+      # heartbeat is written after every check run (every 15-60 min)
+      test: ["CMD", "python", "-c", "import os, time, sys; p='/app/data/monitor_heartbeat'; sys.exit(0 if os.path.exists(p) and time.time() - os.path.getmtime(p) < 7200 else 1)"]
+      interval: 5m
+      timeout: 10s
+      retries: 3
+      start_period: 10m
+
+  cloudflared:
+    image: cloudflare/cloudflared:2026.10.7   # tested: `ingress validate` + rule checks (DEPLOY.md)
+    command: ["tunnel", "--no-autoupdate", "--config", "/etc/cloudflared/config.yml", "run"]
+    volumes:
+      - ./cloudflared:/etc/cloudflared:ro
+    depends_on: [webhook]
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options: {max-size: "10m", max-file: "5"}

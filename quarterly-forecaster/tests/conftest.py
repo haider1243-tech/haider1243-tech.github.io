@@ -72,3 +72,34 @@ class RoutingSession:
         status, payload = out if isinstance(out, tuple) else (200, out)
         full = url + "?" + "&".join(f"{k}={v}" for k, v in params.items())
         return RoutedResponse(payload, status, full)
+
+
+# --------------------------------------------------------------------------- #
+# Dashboard login: every test gets a known password hash; `authed_app` starts
+# an AppTest already logged in (the login page itself is tested in test_auth.py).
+# --------------------------------------------------------------------------- #
+TEST_PASSWORD = "correct horse battery staple"
+_TEST_HASH = None
+
+
+def _test_hash():
+    global _TEST_HASH
+    if _TEST_HASH is None:
+        from forecaster.auth import hash_password
+        _TEST_HASH = hash_password(TEST_PASSWORD, iterations=1000)
+    return _TEST_HASH
+
+
+@pytest.fixture(autouse=True)
+def _dashboard_password(monkeypatch):
+    monkeypatch.setenv("APP_PASSWORD_HASH", _test_hash())
+
+
+def authed_app(path, default_timeout=60):
+    import warnings
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        from streamlit.testing.v1 import AppTest
+    at = AppTest.from_file(path, default_timeout=default_timeout)
+    at.session_state["auth_ok"] = True
+    return at

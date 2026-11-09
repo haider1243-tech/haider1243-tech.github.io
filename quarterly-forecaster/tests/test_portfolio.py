@@ -7,6 +7,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from conftest import authed_app
+
 from forecaster.pipeline import _jsonable, write_json
 from forecaster.portfolio import (
     CashBalance, Holding, Portfolio, PortfolioError, aligned_prices, allocation, build_snapshot, classify,
@@ -267,7 +269,7 @@ def test_portfolio_page_renders(snapshot, tmp_path, monkeypatch):
     write_json(tmp_path / "snapshots" / "portfolio.json", snapshot)
     monkeypatch.setenv("FORECASTER_CACHE_DIR", str(tmp_path))
     app = str(Path(__file__).resolve().parents[1] / "app.py")
-    at = AppTest.from_file(app, default_timeout=60).run()
+    at = authed_app(app, default_timeout=60).run()
     at.sidebar.radio(key="page").set_value("Portfolio").run()
     assert not at.exception, at.exception
     txt = "\n".join([m.value for m in at.markdown] + [c.value for c in at.caption] + [w.value for w in at.warning]
@@ -287,7 +289,7 @@ def test_portfolio_page_without_snapshot(tmp_path, monkeypatch):
         from streamlit.testing.v1 import AppTest
     monkeypatch.setenv("FORECASTER_CACHE_DIR", str(tmp_path))
     app = str(Path(__file__).resolve().parents[1] / "app.py")
-    at = AppTest.from_file(app, default_timeout=60).run()
+    at = authed_app(app, default_timeout=60).run()
     at.sidebar.radio(key="page").set_value("Portfolio").run()
     assert not at.exception
     assert any("portfolio.example.yaml" in i.value for i in at.info)

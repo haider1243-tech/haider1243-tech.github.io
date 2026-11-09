@@ -33,6 +33,48 @@ QUANTILE_LABELS = {0.1: "P10 (downside)", 0.5: "P50 (median)", 0.9: "P90 (upside
 # --------------------------------------------------------------------------- #
 
 settings = load_settings()
+
+
+def require_login() -> None:
+    """Password gate. Fails closed: no APP_PASSWORD_HASH -> nothing renders."""
+    import time as _time
+
+    from forecaster.auth import LoginGuard, password_hash_from_env, verify_password
+
+    stored = password_hash_from_env()
+    if not stored:
+        st.error("Dashboard locked: set APP_PASSWORD_HASH in .env (run `python -m forecaster.auth` to create it), "
+                 "then restart.", icon="🔒")
+        st.stop()
+    if st.session_state.get("auth_ok"):
+        return
+    guard = LoginGuard(settings.cache_dir / "auth_failures.json")
+    st.title("Quarterly Forecaster")
+    with st.form("login"):
+        pw = st.text_input("Password", type="password", key="login_pw")
+        ok = st.form_submit_button("Log in")
+    if ok:
+        fails = st.session_state.get("login_fails", 0)
+        until = st.session_state.get("login_locked_until", 0.0)
+        wait = max(guard.locked_for(), until - _time.time())
+        if wait > 0:
+            st.error(f"Too many failed attempts. Try again in {wait / 60:.0f} min.", icon="⛔")
+        elif verify_password(pw, stored):
+            st.session_state["auth_ok"] = True
+            st.session_state["login_fails"] = 0
+            st.rerun()
+        else:
+            guard.record_failure()
+            fails += 1
+            st.session_state["login_fails"] = fails
+            if fails >= 5:
+                st.session_state["login_locked_until"] = _time.time() + 300
+            _time.sleep(min(2.0, 0.25 * fails))      # slow down guessing
+            st.error("Wrong password.", icon="⛔")
+    st.stop()
+
+
+require_login()
 snap_dir = pipeline.snapshot_dir(settings)
 
 
@@ -129,6 +171,9 @@ with st.sidebar:
         with st.expander("Last refresh log"):
             st.code("\n".join(st.session_state["refresh_log"]), language=None)
     st.caption("Weekly auto-refresh: `scripts/weekly_refresh.sh` (see README).")
+    if st.button("Log out", key="logout"):
+        st.session_state.clear()
+        st.rerun()
 
 
 # --------------------------------------------------------------------------- #

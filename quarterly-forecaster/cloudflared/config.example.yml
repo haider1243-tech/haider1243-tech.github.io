@@ -1,0 +1,11 @@
+# Copy to cloudflared/config.yml and fill in TUNNEL_ID + your hostname (see DEPLOY.md).
+# Only POST https://<hostname>/tv-alert reaches the webhook; every other path, and every
+# other hostname, gets a 404 from Cloudflare's edge and never reaches your machine.
+tunnel: TUNNEL_ID
+credentials-file: /etc/cloudflared/TUNNEL_ID.json
+
+ingress:
+  - hostname: tv.example.com
+    path: ^/tv-alert$
+    service: http://webhook:8000
+  - service: http_status:404

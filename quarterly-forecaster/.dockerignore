@@ -1,0 +1,10 @@
+.venv
+.git
+data
+reports
+logs
+.env
+portfolio.yaml
+cloudflared
+**/__pycache__
+.pytest_cache

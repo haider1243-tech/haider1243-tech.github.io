@@ -8,13 +8,6 @@ requires-python = ">=3.10"
 pythonpath = ["src", "tests"]
 testpaths = ["tests"]
 addopts = "-q"
-
-[build-system]
-requires = ["setuptools>=68"]
-build-backend = "setuptools.build_meta"
-
-[tool.setuptools.packages.find]
-where = ["src"]
 filterwarnings = [
     # hmmlearn 0.3.3 sets ndarray.shape, deprecated in NumPy 2.5 (upstream issue)
     "ignore:Setting the shape on a NumPy array:DeprecationWarning:hmmlearn",
@@ -22,3 +15,10 @@ filterwarnings = [
     # httpx still works. Not installing an unvetted package just to silence this.
     "ignore:Using `httpx` with `starlette.testclient` is deprecated",
 ]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
