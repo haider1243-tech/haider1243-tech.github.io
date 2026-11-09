@@ -48,6 +48,7 @@ src/forecaster/
   execution.py     # OANDA v20 orders for TAKE verdicts only; practice default; hard limits + kill switch
   portfolio.py     # portfolio.yaml -> CAD value, P&L, allocation, beta/vol, joint-bootstrap forecast
   weekly_report.py # Sunday report: Markdown + PDF in reports/ (gitignored), Telegram summary
+  planner.py       # buy-only contribution split toward targets + timing flags; never leverage/options
   model.py         # Forecast contract + block-bootstrap baseline model
   cli.py           # `python -m forecaster`
   sources/         # one adapter per data provider
@@ -185,6 +186,13 @@ data/              # API response cache — contents never committed
   PDF uses built-in fonts (cp1252): pass all text through `pdf_safe()` (no ≈, ⚠ or
   arrows; they render as boxes). Moves: Friday close vs the previous week's last
   close, in CAD (VIX in points). The Telegram summary is HTML-escaped and short.
+- **Contribution planner** (`planner.py`), non-negotiable: buy-only (never
+  sell), never leverage, margin, options, futures or inverse products
+  (`check_instrument` refuses them; keep `LEVERAGED_OR_INVERSE` and the name
+  patterns current, but don't match plain "short"/"ultra", which appear in
+  ordinary bond funds). Buys are >= 0 and sum exactly to the contribution
+  (water-fill least squares). Risk flags only ever suggest splitting a buy across
+  weeks, never skipping or hedging, and say the drawdown probabilities run high.
 - **Injectable I/O**: sources accept a `session` / `downloader` argument so
   tests pass fakes. `load_settings` accepts an `env` dict. Keep it this way.
 - **Tests**: every new module gets a test file. Tests must not touch the network

@@ -24,3 +24,9 @@ cash:
 
 # Flag any single holding above this share of the portfolio.
 concentration_limit: 0.25
+
+# Contribution planner defaults (editable on the Contribution planner page).
+# Targets in percent or fractions; must add up to 100%. Buy-only: nothing is ever sold.
+planner:
+  monthly_amount: 1000
+  targets: {XEQT.TO: 60, VFV.TO: 15, ZAG.TO: 20, XIU.TO: 5}

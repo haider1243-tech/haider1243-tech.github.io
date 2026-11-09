@@ -110,6 +110,7 @@ class Portfolio:
     holdings: tuple[Holding, ...]
     cash: tuple[CashBalance, ...] = ()
     concentration_limit: float = CONCENTRATION_LIMIT
+    planner: dict = field(default_factory=dict)   # {"monthly_amount": float, "targets": {ticker: weight}}
 
     @property
     def tickers(self) -> list[str]:
@@ -179,7 +180,12 @@ def parse_portfolio(data: dict) -> Portfolio:
         raise PortfolioError("concentration_limit must be between 0 and 1")
     if not holdings and not cash:
         raise PortfolioError("portfolio is empty")
-    return Portfolio(tuple(holdings), tuple(cash), limit)
+    planner = data.get("planner") or {}
+    if not isinstance(planner, dict) or not isinstance(planner.get("targets", {}), dict):
+        raise PortfolioError("planner: needs 'monthly_amount' and a 'targets' mapping")
+    planner = {"monthly_amount": float(planner.get("monthly_amount") or 0) or None,
+               "targets": {str(k).upper(): float(v) for k, v in (planner.get("targets") or {}).items()}}
+    return Portfolio(tuple(holdings), tuple(cash), limit, planner)
 
 
 def load_portfolio(path: Path = PORTFOLIO_FILE) -> Portfolio:
@@ -487,6 +493,7 @@ def build_snapshot(pf: Portfolio, native: dict[str, pd.Series], usd_cad: pd.Seri
             "holdings": risk["holdings"],
             "correlation": {"tickers": list(risk["correlation"].columns),
                             "matrix": risk["correlation"].round(4).to_numpy().tolist()}},
+        "planner": pf.planner,
         "forecast_method": ("joint block bootstrap of daily CAD returns (20-day blocks, "
                             f"{n_paths:,} buy-and-hold paths)"),
         "value_label": "Value", "history_label": "Weekly value",

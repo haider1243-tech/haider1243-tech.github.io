@@ -24,7 +24,7 @@ from forecaster.config import load_settings  # noqa: E402
 
 st.set_page_config(page_title="Quarterly Forecaster", page_icon="📈", layout="wide")
 
-PAGES = ("Forecast", "Portfolio", "Macro & events", "Sentiment & news")
+PAGES = ("Forecast", "Portfolio", "Contribution planner", "Macro & events", "Sentiment & news")
 QUANTILE_LABELS = {0.1: "P10 (downside)", 0.5: "P50 (median)", 0.9: "P90 (upside)"}
 
 
@@ -463,8 +463,102 @@ def page_portfolio(_t: str) -> None:
                "hasn't been backtested.")
 
 
+def page_planner(_t: str) -> None:
+    from forecaster import planner as pl
+
+    st.subheader("Contribution planner (CAD)")
+    st.caption("Splits each contribution toward your target allocation by buying what's most underweight. "
+               "Buy-only: it never sells, never uses leverage, margin or options, and the suggested buys "
+               "always add up to exactly your contribution.")
+    ps = portfolio_snap()
+    if ps is None:
+        st.info("Needs your holdings: create `portfolio.yaml` (see `portfolio.example.yaml`) and press "
+                "**Refresh data**.", icon="ℹ️")
+        return
+    h = pd.DataFrame(ps["holdings"])
+    held = h[h["ticker"] != "CASH"]
+    current = held.groupby("ticker")["market_value"].sum().to_dict()
+    prices = held.groupby("ticker")["price_cad"].last().to_dict()
+    names = held.groupby("ticker")["name"].last().to_dict()
+    snaps = {}
+    for p in sorted(snap_dir.glob("ticker_*.json")):
+        s = read_snapshot(p)
+        if s and s.get("ticker"):
+            snaps[s["ticker"]] = s
+            if s.get("currency") == "CAD" and s["ticker"] not in prices and not s.get("converted_from"):
+                prices[s["ticker"]] = s["last_close"]
+    defaults = ps.get("planner") or {}
+    inv = sum(current.values())
+    default_targets = defaults.get("targets") or (
+        {t: round(v / inv * 100, 1) for t, v in current.items()} if inv else {})
+
+    c1, c2 = st.columns([1, 2])
+    amount = c1.number_input("Monthly contribution (CAD)", min_value=0.0, step=50.0,
+                             value=float(defaults.get("monthly_amount") or 500.0), key="pl_amount")
+    whole = c1.checkbox("Whole shares only", value=False, key="pl_whole",
+                        help="Leave unticked if your broker supports fractional shares.")
+    c1.caption("Defaults come from the `planner:` section of portfolio.yaml.")
+    edited = c2.data_editor(
+        pd.DataFrame({"Ticker": list(default_targets), "Target %": [float(v) * (100 if sum(default_targets.values()) <= 1.01 else 1)
+                                                                    for v in default_targets.values()]}),
+        num_rows="dynamic", hide_index=True, use_container_width=True, key="pl_targets",
+        column_config={"Target %": st.column_config.NumberColumn(min_value=0.0, max_value=100.0, step=1.0, format="%.1f")})
+    targets = {str(r["Ticker"]).strip().upper(): float(r["Target %"] or 0) for _, r in edited.iterrows()
+               if str(r["Ticker"] or "").strip()}
+    c2.caption(f"Targets add up to {sum(targets.values()):.1f}% (must be 100%).")
+
+    try:
+        plan = pl.plan_contribution(current, targets, amount, prices, whole_shares=whole, names=names)
+    except pl.PlannerError as exc:
+        st.error(str(exc), icon="⛔")
+        return
+
+    r = plan.rows
+    st.markdown("**Suggested split for this contribution**")
+    st.dataframe(pd.DataFrame({
+        "Ticker": r["ticker"], "Now (CAD)": r["current_value"], "Now %": r["current_weight"],
+        "Target %": r["target_weight"], "Buy (CAD)": r["buy"],
+        "≈ Shares": [("" if s is None or b <= 0 else (f"{s:,.0f}" if whole else f"{s:,.2f}"))
+                     for s, b in zip(r["shares"], r["buy"])],
+        "After %": r["weight_after"], "Gap after (pts)": r["drift_after"] * 100}),
+        hide_index=True, use_container_width=True, column_config={
+            "Now (CAD)": st.column_config.NumberColumn(format="%.0f"),
+            "Buy (CAD)": st.column_config.NumberColumn(format="%.2f"),
+            **{c: st.column_config.NumberColumn(format="percent") for c in ("Now %", "Target %", "After %")},
+            "Gap after (pts)": st.column_config.NumberColumn(format="%+.1f")})
+    m1, m2, m3 = st.columns(3)
+    m1.metric("Largest gap to target", f"{plan.max_drift_after:.1%}", f"{(plan.max_drift_after - plan.max_drift_before) * 100:+.1f} pts",
+              delta_color="inverse")
+    m2.metric("Months to within 1 pt of target",
+              "already there" if plan.months_to_target == 0 else ("10+ years" if plan.months_to_target is None else str(plan.months_to_target)))
+    m2.caption("at this contribution, if prices don't move")
+    m3.metric("Not invested (rounding)", f"C${plan.leftover:,.2f}")
+    for n in plan.notes:
+        st.caption(n)
+    st.caption("The split minimises the total distance to target in dollars, so the biggest gaps fill first. "
+               "A small target can get nothing this month and be picked up once the larger gaps shrink.")
+    st.caption("The split is by ticker across all accounts. Which account to buy in (TFSA, FHSA, RRSP or "
+               "non-registered) depends on your contribution room, which isn't tracked here.")
+
+    st.markdown("**Timing check**")
+    flags = pl.risk_flags(list(plan.rows["ticker"]), snaps, ps, market_snap(), pd.Timestamp.today())
+    if flags:
+        for f in flags:
+            st.warning(f["message"], icon="⚠️")
+        sched = pl.tranche_schedule(amount - plan.leftover, pd.Timestamp.today(), market_snap(), n=pl.PlannerConfig().tranches)
+        st.markdown(f"You could split this buy into {len(sched)} weekly parts, on days without "
+                    "high-impact events. Each part uses the same split:")
+        st.dataframe(pd.DataFrame({"Date": [d["date"].date() for d in sched], "Amount (CAD)": [d["amount"] for d in sched]}),
+                     hide_index=True, column_config={"Amount (CAD)": st.column_config.NumberColumn(format="%.2f")})
+    else:
+        st.success("No elevated drawdown, volatility, VIX or event-risk flags: one buy is fine by these checks.", icon="✅")
+    st.caption("These flags are rough risk checks, not predictions. The backtest found the forecaster's drawdown "
+               "probabilities too high at the high end, and spreading a buy over a few weeks mainly smooths the "
+               "entry price; it doesn't improve expected returns. Not financial advice.")
+
+
 # --------------------------------------------------------------------------- #
 
 backtest_banner(ticker)
-{"Forecast": page_forecast, "Portfolio": page_portfolio, "Macro & events": page_macro,
- "Sentiment & news": page_sentiment}[page](ticker)
+{"Forecast": page_forecast, "Portfolio": page_portfolio, "Contribution planner": page_planner,
+ "Macro & events": page_macro, "Sentiment & news": page_sentiment}[page](ticker)

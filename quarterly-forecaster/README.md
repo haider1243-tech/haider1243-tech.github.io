@@ -68,6 +68,27 @@ For US-listed holdings, enter your CAD cost (`cost_currency: CAD`), or a USD cos
 (the USD/CAD rate when you bought). Otherwise the P&L leaves out currency gains or losses since
 purchase, and the holding is labelled to say so.
 
+## Contribution planner
+
+The **Contribution planner** page takes a monthly CAD amount and a target allocation. Defaults come
+from the `planner:` section of `portfolio.yaml`, and both are editable on the page. It suggests how
+to split the contribution to move toward target:
+- **Buy-only.** It never sells, and never suggests leverage, margin or options. Leveraged, inverse,
+  option, futures and index symbols are refused as targets.
+- **Exact totals.** The buys always add up to your contribution, or to the cent less with whole
+  shares, where the leftover is shown.
+- **Biggest gaps first.** It minimises the total distance to target, so the largest gaps fill
+  first. It also estimates how many months until every weight is within 1 point of target.
+
+It flags any of these, and suggests splitting the buy into 3 weekly parts on days without
+high-impact events:
+- elevated drawdown risk: next-quarter P(>10% drawdown) of 35% or more
+- the high-volatility regime at 50% or more
+- VIX at 25 or higher
+- a high event-risk week: 6 or more high-impact event points in the next 7 days
+
+These are rough checks: spreading a buy smooths the entry price but doesn't raise expected returns.
+
 ## Sunday weekly report
 
 `python -m forecaster.weekly_report` refreshes data, then writes `reports/weekly_YYYY-MM-DD.md` and
