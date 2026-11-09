@@ -68,6 +68,23 @@ For US-listed holdings, enter your CAD cost (`cost_currency: CAD`), or a USD cos
 (the USD/CAD rate when you bought). Otherwise the P&L leaves out currency gains or losses since
 purchase, and the holding is labelled to say so.
 
+## Sunday weekly report
+
+`python -m forecaster.weekly_report` refreshes data, then writes `reports/weekly_YYYY-MM-DD.md` and
+`.pdf` and sends a short summary to your Telegram bot. The report covers:
+- last week's moves: SPY, QQQ and gold in CAD, VIX in points, plus USD/CAD
+- macro data released last week
+- next week's high-impact events, with dates and typical release times
+- the 4-quarter forecasts vs last week
+- sentiment shifts and shocks
+- your portfolio changes
+
+Each run saves `reports/state/<date>.json`, which the next run compares against, so the first
+report has nothing to compare with. `reports/` is gitignored because it contains your portfolio.
+
+Schedule it for Sunday (cron): `23 7 * * 0 /full/path/to/quarterly-forecaster/scripts/weekly_report.sh`.
+Useful flags: `--no-refresh`, `--no-send`, `--date YYYY-MM-DD`.
+
 ## Weekly auto-refresh
 
 `scripts/weekly_refresh.sh` refreshes everything, re-runs any backtest older than

@@ -47,12 +47,14 @@ src/forecaster/
   vwap_backtest.py # bar-for-bar Python port of pine/vwap_gold.pine (TV broker-emulator rules)
   execution.py     # OANDA v20 orders for TAKE verdicts only; practice default; hard limits + kill switch
   portfolio.py     # portfolio.yaml -> CAD value, P&L, allocation, beta/vol, joint-bootstrap forecast
+  weekly_report.py # Sunday report: Markdown + PDF in reports/ (gitignored), Telegram summary
   model.py         # Forecast contract + block-bootstrap baseline model
   cli.py           # `python -m forecaster`
   sources/         # one adapter per data provider
 app.py             # Streamlit dashboard (reads data/snapshots/*.json only)
 pine/vwap_gold.pine # TradingView v6 strategy; keep in sync with vwap_backtest.py
 scripts/weekly_refresh.sh  # cron job: pipeline + stale backtests, logs in data/logs/
+scripts/weekly_report.sh   # Sunday cron job: weekly_report (refresh, md+pdf, Telegram)
 results/           # committed backtest reports + reference summary (backtest_GSPC.json)
 tests/             # pytest, no network (test_app.py drives app.py with AppTest)
 data/              # API response cache — contents never committed
@@ -177,6 +179,12 @@ data/              # API response cache — contents never committed
   correlation is kept; a test fails if assets are resampled independently).
   Buy-and-hold, not backtested. Say so wherever it's shown. Concentration flag:
   a holding (summed across accounts) strictly above `concentration_limit` (25%).
+- **Weekly report** (`weekly_report.py`): one `Report` model rendered to both
+  Markdown and PDF (reportlab), so they can't drift. Comparisons use the previous
+  `reports/state/*.json`. `reports/` holds portfolio data and is gitignored. The
+  PDF uses built-in fonts (cp1252): pass all text through `pdf_safe()` (no ≈, ⚠ or
+  arrows; they render as boxes). Moves: Friday close vs the previous week's last
+  close, in CAD (VIX in points). The Telegram summary is HTML-escaped and short.
 - **Injectable I/O**: sources accept a `session` / `downloader` argument so
   tests pass fakes. `load_settings` accepts an `env` dict. Keep it this way.
 - **Tests**: every new module gets a test file. Tests must not touch the network
@@ -207,6 +215,7 @@ python -m forecaster.backtest SPY --out results/spy   # walk-forward 2005-now (~
 python -m forecaster.pipeline      # refresh dashboard snapshots (add --backtest-stale-days 28)
 streamlit run app.py               # dashboard
 scripts/weekly_refresh.sh          # what cron runs weekly
+python -m forecaster.weekly_report --no-send   # build reports/weekly_<date>.md + .pdf
 python -m forecaster.webhook_server --port 8000   # TradingView webhook (expose via HTTPS)
 python -m forecaster.webhook_server --stats       # outcome stats by verdict
 python -m forecaster.vwap_backtest --pine-events --fred-events   # event list for the Pine input
