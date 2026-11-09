@@ -262,25 +262,23 @@ def test_snapshot_contents(snapshot):
 
 
 def test_portfolio_page_renders(snapshot, tmp_path, monkeypatch):
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore")
-        from streamlit.testing.v1 import AppTest
     (tmp_path / "snapshots").mkdir()
     write_json(tmp_path / "snapshots" / "portfolio.json", snapshot)
     monkeypatch.setenv("FORECASTER_CACHE_DIR", str(tmp_path))
     app = str(Path(__file__).resolve().parents[1] / "app.py")
     at = authed_app(app, default_timeout=60).run()
-    at.sidebar.radio(key="page").set_value("Portfolio").run()
+    at.radio(key="tab").set_value("portfolio").run()
     assert not at.exception, at.exception
-    txt = "\n".join([m.value for m in at.markdown] + [c.value for c in at.caption] + [w.value for w in at.warning]
-                    + [m.label for m in at.metric] + [m.value for m in at.metric])
-    assert "Portfolio (CAD)" in [x.value for x in at.subheader]
-    assert "Market value" in txt and "C$" in txt and "Beta vs S&P/TSX 60" in txt
+    html = "\n".join(str(e.proto.body) for e in at.get("html"))
+    txt = "\n".join([m.value for m in at.markdown] + [c.value for c in at.caption] + [w.value for w in at.warning])
+    assert "### Portfolio" in txt and "C$" in html and "XEQT.TO" in html and "TFSA" in html
+    assert "P&amp;L" in html and "Volatility" in html
     assert "XEQT.TO is" in txt and "limit 25%" in txt                         # concentration flag
-    assert "Backtest accuracy" in txt                                          # banner on this page too
-    assert "hasn't been backtested" in txt
-    tables = [d.value for d in at.dataframe]
-    assert any("Value (CAD)" in t.columns for t in tables) and any("P50 (CAD)" in t.columns for t in tables)
+    assert "Forecast range (CAD)" in txt and "not backtested" in txt
+    assert len(at.get("plotly_chart")) == 2                                    # allocation + forecast fan
+    for view in ("sector", "account", "region"):
+        at.radio(key="alloc").set_value(view).run()
+        assert not at.exception
 
 
 def test_portfolio_page_without_snapshot(tmp_path, monkeypatch):
@@ -290,6 +288,6 @@ def test_portfolio_page_without_snapshot(tmp_path, monkeypatch):
     monkeypatch.setenv("FORECASTER_CACHE_DIR", str(tmp_path))
     app = str(Path(__file__).resolve().parents[1] / "app.py")
     at = authed_app(app, default_timeout=60).run()
-    at.sidebar.radio(key="page").set_value("Portfolio").run()
+    at.radio(key="tab").set_value("portfolio").run()
     assert not at.exception
     assert any("portfolio.example.yaml" in i.value for i in at.info)

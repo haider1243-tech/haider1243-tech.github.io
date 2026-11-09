@@ -88,8 +88,12 @@ def currency_note(snap: dict) -> str:
 # Forecast
 # --------------------------------------------------------------------------- #
 
-def fan_chart(snap: dict, pal: dict, height: int = 440) -> go.Figure:
-    """Weekly history, then the P10-P90 band and P50 for each quarter-end."""
+def fan_chart(snap: dict, pal: dict, height: int = 440, compact: bool = False) -> go.Figure:
+    """Weekly history, then the P10-P90 band and P50 for each quarter-end.
+
+    compact=True (phones): 1 year of history, no legend or end labels (the
+    caption under the chart states the range), small margins.
+    """
     hist = pd.DataFrame(snap.get("history") or [])
     fc = pd.DataFrame(snap["forecast"])
     as_of = pd.Timestamp(snap["as_of"])
@@ -126,9 +130,17 @@ def fan_chart(snap: dict, pal: dict, height: int = 440) -> go.Figure:
                            xanchor="left", xshift=8, font=dict(color=pal["ink2"], size=12))
     fig.update_layout(hovermode="x unified")
     _layout(fig, pal, height, y_format=",.0f", y_title=f"{snap.get('value_label', 'Price')} ({unit(snap)})")
-    fig.update_layout(margin=dict(r=110))  # room for the P10/P50/P90 end labels
-    fig.update_xaxes(range=[x[0] - pd.DateOffset(years=2) if hist.empty else pd.to_datetime(hist["date"]).min(),
-                            x[-1] + pd.DateOffset(days=120)])
+    fig.update_layout(margin=dict(r=110))
+    if compact:
+        fig.layout.annotations = ()
+        fig.update_layout(height=230, showlegend=False, margin=dict(l=4, r=6, t=6, b=4),
+                          hovermode="x unified", dragmode=False)
+        fig.update_yaxes(title=None, nticks=4, tickfont=dict(size=11))
+        fig.update_xaxes(range=[x[0] - pd.DateOffset(years=1), x[-1] + pd.DateOffset(days=15)],
+                         nticks=4, tickfont=dict(size=11))
+    else:
+        fig.update_xaxes(range=[x[0] - pd.DateOffset(years=2) if hist.empty else pd.to_datetime(hist["date"]).min(),
+                                x[-1] + pd.DateOffset(days=120)])
     return fig
 
 
@@ -267,7 +279,7 @@ def sentiment_trend(rows: list[dict], pal: dict, height: int = 260) -> go.Figure
 # Portfolio
 # --------------------------------------------------------------------------- #
 
-def allocation_chart(items: list[dict], pal: dict, highlight_over: float | None = None) -> go.Figure:
+def allocation_chart(items: list[dict], pal: dict, highlight_over: float | None = None) -> go.Figure:  # noqa: C901
     """Ranked horizontal bars of weights (one series: slot 1). Bars over
     `highlight_over` keep the same colour; the label carries the warning so colour is never alone."""
     df = pd.DataFrame(items).sort_values("weight")

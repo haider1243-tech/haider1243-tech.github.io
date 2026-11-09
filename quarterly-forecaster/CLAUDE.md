@@ -49,12 +49,18 @@ src/forecaster/
   portfolio.py     # portfolio.yaml -> CAD value, P&L, allocation, beta/vol, joint-bootstrap forecast
   weekly_report.py # Sunday report: Markdown + PDF in reports/ (gitignored), Telegram summary
   planner.py       # buy-only contribution split toward targets + timing flags; never leverage/options
-  monitor.py       # 24/7 APScheduler checks -> Telegram (deduped) + /status long-polling bot
+  monitor.py       # 24/7 APScheduler checks -> Telegram (deduped) + /status bot; writes prices.json
+  status.py        # data health (data/status.json): last success/failure per source -> red banner
+  appdata.py       # pure helpers for the app tabs (outlook lines, calendar, gold journal, reports)
+  launcher.py      # supervises monitor + webhook + dashboard (+ cloudflared) for start.bat/start.sh
   auth.py          # dashboard password (PBKDF2, ':'-separated hash) + login lockouts
   model.py         # Forecast contract + block-bootstrap baseline model
   cli.py           # `python -m forecaster`
   sources/         # one adapter per data provider
-app.py             # Streamlit dashboard (reads data/snapshots/*.json only)
+app.py             # mobile-first Streamlit app, 5 bottom tabs (reads data/snapshots/*.json only)
+static/            # PWA manifest + icons (served at /app/static/; regenerate: scripts/make_icons.py)
+start.bat, stop.bat, setup.bat, scripts/windows/   # Windows one-click launcher, shortcuts, auto-start
+start.sh           # same launcher on Linux/macOS
 pine/vwap_gold.pine # TradingView v6 strategy; keep in sync with vwap_backtest.py
 scripts/weekly_refresh.sh  # cron job: pipeline + stale backtests, logs in data/logs/
 scripts/weekly_report.sh   # Sunday cron job: weekly_report (refresh, md+pdf, Telegram)
@@ -140,11 +146,22 @@ data/              # API response cache — contents never committed
   beat the baseline". Don't tune on the backtest and then quote the same
   backtest as out-of-sample.
 - **Dashboard** (`app.py`): never runs models on page load; it reads snapshots
-  from `pipeline.py` (cached by file mtime). Backtest accuracy and its verdict
-  sit above every page; with no per-ticker backtest, the committed S&P 500
-  reference is shown and labelled as such. Never show a P50 without its band.
-  Charts follow the dataviz palette (validated light + dark). Accent colour is
-  blue (`.streamlit/config.toml`), so red keeps its meaning.
+  from `pipeline.py` (cached by file mtime). Mobile-first: dark theme, bottom tab
+  bar (`st.radio` key `tab` in `st.container(key="bottomnav")`, synced with `?tab=`),
+  test at 390 px wide (no horizontal page scroll; wide tables scroll in their own box).
+  Every tab shows the red health banner (`status.problems`) and "Last updated".
+  The honest backtest note (`model_note`) stays visible. Never show a P50 without
+  its band. Charts follow the dataviz palette. Accent colour is blue, so red keeps
+  its meaning (problems, SKIP, high impact), always with a text label.
+- **Data health** (`status.py`): every refresher records success/failure per source
+  (prices + news in the monitor, market/portfolio/forecasts in `pipeline.refresh_all`).
+  Limits: 24 h, forecasts 8 days. News/portfolio are only expected when configured.
+- **Schedule** (`monitor.py`): checks + prices/news every 15 min around the clock;
+  macro/events refresh 06:15 + 18:15 NY; forecast rebuild + weekly report Sunday
+  18:00 `America/Edmonton` (MT).
+- **Launcher** (`launcher.py`): binds everything to 127.0.0.1, restarts crashed services
+  with backoff, one instance (data/launcher.pid). The webhook gets `--trust-proxy` only
+  when cloudflared runs. Windows scripts must keep CRLF line endings (`.gitattributes`).
 - **Webhook** (`webhook_server.py`): fails closed (no `WEBHOOK_SECRET` -> 503),
   compares the secret in constant time, and never stores or logs it. It parses
   JSON from the raw body (TradingView sends text/plain). The request path reads
@@ -250,6 +267,9 @@ python -m forecaster.execution --kill --flatten  # stop all orders and close pos
 python -m forecaster.auth                        # make APP_PASSWORD_HASH for .env
 python -m forecaster.monitor --once              # run the monitor checks once
 docker compose up -d                             # 24/7 private deployment (DEPLOY.md)
+python -m forecaster.launcher --open             # all services without Docker (start.bat / start.sh)
+python -m forecaster.launcher --status|--stop|--check
+python -m forecaster.auth --write-env            # set the dashboard password in .env
 ```
 
 (Run from this folder with `PYTHONPATH=src`, or `pip install -e .`.)

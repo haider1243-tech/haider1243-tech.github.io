@@ -1,0 +1,16 @@
+{
+  "name": "Quarterly Forecaster",
+  "short_name": "Forecaster",
+  "description": "Private market dashboard: regime, forecast ranges, calendar, gold VWAP journal, portfolio.",
+  "start_url": "/?tab=week",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0d0d0d",
+  "theme_color": "#0d0d0d",
+  "icons": [
+    {"src": "/app/static/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any"},
+    {"src": "/app/static/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any"},
+    {"src": "/app/static/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable"}
+  ]
+}

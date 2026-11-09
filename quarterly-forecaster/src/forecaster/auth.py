@@ -87,10 +87,14 @@ def password_hash_from_env() -> str | None:
     return v or None
 
 
-def main() -> int:  # pragma: no cover - interactive
+def main(argv: list[str] | None = None) -> int:  # pragma: no cover - interactive
+    import argparse
     import getpass
 
-    p1 = getpass.getpass("Dashboard password: ")
+    ap = argparse.ArgumentParser(description="Create the dashboard password hash")
+    ap.add_argument("--write-env", action="store_true", help="save it straight into .env")
+    args = ap.parse_args(argv)
+    p1 = getpass.getpass("Dashboard password (12+ characters, typing is hidden): ")
     p2 = getpass.getpass("Again: ")
     if p1 != p2:
         print("Passwords don't match.")
@@ -98,8 +102,16 @@ def main() -> int:  # pragma: no cover - interactive
     if len(p1) < 12:
         print("Use at least 12 characters.")
         return 1
+    h = hash_password(p1)
+    if args.write_env:
+        from forecaster.config import PROJECT_ROOT
+        from forecaster.launcher import set_env_value
+
+        set_env_value(PROJECT_ROOT / ".env", "APP_PASSWORD_HASH", h)
+        print("Saved to .env (only a hash; the password itself is not stored).")
+        return 0
     print("Add this line to .env (the password itself is not stored):")
-    print(f"APP_PASSWORD_HASH={hash_password(p1)}")
+    print(f"APP_PASSWORD_HASH={h}")
     return 0
 
 

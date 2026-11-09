@@ -12,6 +12,13 @@ What ends up reachable:
 There is no public website. Don't run `tailscale funnel` (that makes things public), and don't open
 port 8501 or 8000 in any firewall or router.
 
+**Two ways to run it.** On a Windows home PC the simplest is the one-click launcher: double-click
+`setup.bat` once, then `start.bat` / the desktop shortcut (see README, *Use it as a phone app*). It
+runs the same services with the same privacy rules (loopback only, `tailscale serve`, tunnel only if
+`cloudflared/config.yml` exists and `cloudflared` is installed). You can skip step 2 below; steps 3
+and 4 (Tailscale, Cloudflare Tunnel) apply to both. For a VPS or Linux box, use Docker Compose as
+described here.
+
 ---
 
 ## 0. Prerequisites
@@ -82,7 +89,11 @@ in after the first daily refresh. To fill them now, run `docker compose exec mon
    ```
    `--bg` keeps it running across reboots. To undo: `sudo tailscale serve reset`.
 5. On your phone, with Tailscale connected, open `https://<machine>.<tailnet>.ts.net` and log in with
-   the dashboard password. Add it to the home screen for an app-like icon.
+   the dashboard password. Install it to the home screen (it's a PWA: own icon, full-screen):
+   - **iPhone (Safari):** Share → *Add to Home Screen*.
+   - **Android (Chrome):** ⋮ → *Install app* (or *Add to Home screen*).
+   HTTPS from `tailscale serve` is what lets the phone install it; the icon still only works while
+   Tailscale is connected, and the app still asks for the password.
 6. Optional hardening: in the admin console, *Access controls*, allow only your own user to reach
    the server, and *Settings → Device approval* so new devices need your approval.
 

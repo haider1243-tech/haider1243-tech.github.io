@@ -17,6 +17,7 @@ RUN if [ "$INSTALL_ML" = "true" ]; then \
 
 COPY pyproject.toml app.py watchlist.yaml portfolio.example.yaml ./
 COPY .streamlit ./.streamlit
+COPY static ./static
 COPY src ./src
 COPY results ./results
 COPY pine ./pine

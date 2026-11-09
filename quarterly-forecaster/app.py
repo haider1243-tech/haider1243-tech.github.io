@@ -1,16 +1,19 @@
-"""Quarterly Forecaster dashboard.
+"""Quarterly Forecaster: private, mobile-first dashboard.
 
-    streamlit run app.py
+    streamlit run app.py        (or start.bat / python -m forecaster.launcher)
 
-Reads JSON snapshots written by `python -m forecaster.pipeline` (or the
-Refresh button / scripts/weekly_refresh.sh). Never computes models on page
-load. Backtest accuracy is shown above every page.
+Bottom tabs: This Week · Calendar · Gold VWAP · Portfolio · Reports. Reads JSON
+snapshots only (never runs models on page load). Password-gated, dark theme,
+installable to the phone home screen (PWA manifest in static/). A red banner
+shows whenever a data source failed or is older than its limit.
 """
 
 from __future__ import annotations
 
+import html
+import os
 import sys
-from datetime import datetime, timezone
+import time as _time
 from pathlib import Path
 
 import pandas as pd
@@ -18,27 +21,111 @@ import streamlit as st
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))  # works without `pip install -e .`
 
+from forecaster import appdata as ad  # noqa: E402
 from forecaster import dashboard as viz  # noqa: E402
 from forecaster import pipeline  # noqa: E402
-from forecaster.config import load_settings  # noqa: E402
+from forecaster import status as health  # noqa: E402
+from forecaster.config import PROJECT_ROOT, load_settings  # noqa: E402
 
-st.set_page_config(page_title="Quarterly Forecaster", page_icon="📈", layout="wide")
+st.set_page_config(page_title="Forecaster", page_icon="📈", layout="centered", initial_sidebar_state="collapsed")
 
-PAGES = ("Forecast", "Portfolio", "Contribution planner", "Macro & events", "Sentiment & news")
-QUANTILE_LABELS = {0.1: "P10 (downside)", 0.5: "P50 (median)", 0.9: "P90 (upside)"}
-
-
-# --------------------------------------------------------------------------- #
-# Data access (cached on file modification time, so new snapshots show up)
-# --------------------------------------------------------------------------- #
-
+TABS = {"week": "This Week", "calendar": "Calendar", "gold": "Gold VWAP", "portfolio": "Portfolio",
+        "reports": "Reports"}
+ICONS = ["📊", "📅", "🥇", "💼", "📄"]
+PAL = viz.PALETTES["dark"]
+STATUS = {"good": "#0ca30c", "warning": "#fab219", "serious": "#ec835a", "critical": "#d03b3b"}
 settings = load_settings()
 
+# --------------------------------------------------------------------------- #
+# Head tags (PWA) + mobile CSS
+# --------------------------------------------------------------------------- #
+
+PWA_HEAD = """<script>
+(function () {
+  const d = document;
+  if (d.querySelector('link[rel="manifest"]')) return;
+  const add = (tag, attrs) => { const el = d.createElement(tag);
+    Object.entries(attrs).forEach(([k, v]) => el.setAttribute(k, v)); d.head.appendChild(el); };
+  add('link', {rel: 'manifest', href: '/app/static/manifest.json'});
+  add('link', {rel: 'apple-touch-icon', href: '/app/static/apple-touch-icon.png'});
+  add('meta', {name: 'theme-color', content: '#0d0d0d'});
+  add('meta', {name: 'mobile-web-app-capable', content: 'yes'});
+  add('meta', {name: 'apple-mobile-web-app-capable', content: 'yes'});
+  add('meta', {name: 'apple-mobile-web-app-status-bar-style', content: 'black-translucent'});
+  add('meta', {name: 'apple-mobile-web-app-title', content: 'Forecaster'});
+})();
+</script>"""
+
+_nav_icons = "\n".join(
+    f'.st-key-bottomnav [role="radiogroup"] > div:nth-child({i + 1}) p::before {{ content: "{ic}"; }}'
+    for i, ic in enumerate(ICONS))
+CSS = """<style>
+#MainMenu, header[data-testid="stHeader"], footer, [data-testid="stToolbar"], [data-testid="stDecoration"],
+[data-testid="stSidebar"], [data-testid="stSidebarCollapsedControl"], [data-testid="collapsedControl"],
+.stDeployButton { display: none !important; }
+.block-container, [data-testid="stMainBlockContainer"] { padding: 0.75rem 0.85rem 6.5rem !important; max-width: 760px; }
+html, body { overscroll-behavior-y: none; }
+h1, h2, h3 { letter-spacing: -0.01em; }
+.st-key-pwa { display: none; }
+
+/* bottom tab bar: radiogroup > div[data-selected] > label > (span>input, div > (circle, markdown>p)) */
+.st-key-bottomnav { position: fixed; left: 0; right: 0; bottom: 0; z-index: 1000; background: #1a1a19;
+  border-top: 1px solid rgba(255,255,255,0.10); padding: 4px 4px calc(4px + env(safe-area-inset-bottom)); gap: 0; }
+.st-key-bottomnav .stElementContainer, .st-key-bottomnav [data-testid="stRadio"] { width: 100% !important; }
+.st-key-bottomnav [data-testid="stWidgetLabel"] { display: none; }
+.st-key-bottomnav [role="radiogroup"] { display: flex; flex-wrap: nowrap; justify-content: space-around;
+  gap: 0 !important; width: 100%; max-width: 760px; margin: 0 auto; }
+.st-key-bottomnav [role="radiogroup"] > div { flex: 1 1 0; min-width: 0; display: flex; }
+.st-key-bottomnav [data-testid="stRadioOption"] { flex: 1 1 auto; justify-content: center; margin: 0 !important;
+  padding: 5px 0 3px; border-radius: 10px; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+.st-key-bottomnav [data-testid="stRadioOption"] > div { display: flex; justify-content: center; width: 100%; }
+.st-key-bottomnav [data-testid="stRadioOption"] > div > div:first-child:not([data-testid]) { display: none !important; }
+.st-key-bottomnav [data-testid="stRadioOption"] p { font-size: 0.68rem; line-height: 1.15; text-align: center;
+  color: #898781; white-space: nowrap; margin: 0; }
+.st-key-bottomnav [data-testid="stRadioOption"] p::before { display: block; font-size: 1.3rem; line-height: 1.35;
+  filter: grayscale(1) opacity(0.65); }
+.st-key-bottomnav [role="radiogroup"] > div[data-selected="true"] p { color: #3987e5; font-weight: 600; }
+.st-key-bottomnav [role="radiogroup"] > div[data-selected="true"] p::before { filter: none; }
+.st-key-bottomnav [role="radiogroup"] > div[data-selected="true"] [data-testid="stRadioOption"] { background: rgba(57,135,229,0.14); }
+""" + _nav_icons + """
+
+/* cards, chips, badges */
+.qf-card { background: #1a1a19; border: 1px solid rgba(255,255,255,0.10); border-radius: 14px; padding: 12px 14px; margin: 0 0 10px; }
+.qf-muted { color: #898781; font-size: 0.8rem; }
+.qf-row { display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0 8px; }
+.qf-chip { flex: 1 1 100px; background: #232322; border-radius: 10px; padding: 8px 10px; min-width: 0; }
+.qf-chip .k { color: #898781; font-size: 0.72rem; }
+.qf-chip .v { color: #f0efec; font-size: 1.05rem; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.qf-chip .d { font-size: 0.75rem; color: #c3c2b7; }
+.qf-badge { display: inline-block; border-radius: 999px; padding: 1px 9px; font-size: 0.72rem; font-weight: 700; color: #0b0b0b; }
+.qf-banner { background: #d03b3b; color: #ffffff; border-radius: 12px; padding: 10px 12px; margin: 0 0 10px; font-size: 0.85rem; }
+.qf-banner b { display: block; margin-bottom: 2px; }
+.qf-item { display: flex; gap: 10px; align-items: flex-start; border-left: 4px solid #383835; padding: 8px 10px; margin: 0 0 8px;
+  background: #1a1a19; border-radius: 0 10px 10px 0; }
+.qf-item .t { font-weight: 600; color: #f0efec; font-size: 0.92rem; }
+.qf-item .s { color: #c3c2b7; font-size: 0.78rem; }
+.qf-item .r { margin-left: auto; text-align: right; white-space: nowrap; font-size: 0.8rem; color: #f0efec; }
+.qf-outlook p { margin: 0 0 4px; font-size: 0.95rem; }
+[data-testid="stPlotlyChart"] { margin-bottom: -6px; }
+.st-key-report table { display: block; overflow-x: auto; max-width: 100%; white-space: nowrap; font-size: 0.82rem; }
+.st-key-report h1 { font-size: 1.35rem; } .st-key-report h2 { font-size: 1.1rem; } .st-key-report h3 { font-size: 1rem; }
+</style>"""
+
+
+def head_and_css() -> None:
+    with st.container(key="pwa"):
+        st.html(PWA_HEAD, unsafe_allow_javascript=True)
+    st.html(CSS)
+
+
+head_and_css()
+
+
+# --------------------------------------------------------------------------- #
+# Login (fails closed)
+# --------------------------------------------------------------------------- #
 
 def require_login() -> None:
-    """Password gate. Fails closed: no APP_PASSWORD_HASH -> nothing renders."""
-    import time as _time
-
     from forecaster.auth import LoginGuard, password_hash_from_env, verify_password
 
     stored = password_hash_from_env()
@@ -49,10 +136,10 @@ def require_login() -> None:
     if st.session_state.get("auth_ok"):
         return
     guard = LoginGuard(settings.cache_dir / "auth_failures.json")
-    st.title("Quarterly Forecaster")
+    st.markdown("## 📈 Forecaster")
     with st.form("login"):
         pw = st.text_input("Password", type="password", key="login_pw")
-        ok = st.form_submit_button("Log in")
+        ok = st.form_submit_button("Log in", width="stretch")
     if ok:
         fails = st.session_state.get("login_fails", 0)
         until = st.session_state.get("login_locked_until", 0.0)
@@ -69,7 +156,7 @@ def require_login() -> None:
             st.session_state["login_fails"] = fails
             if fails >= 5:
                 st.session_state["login_locked_until"] = _time.time() + 300
-            _time.sleep(min(2.0, 0.25 * fails))      # slow down guessing
+            _time.sleep(min(2.0, 0.25 * fails))
             st.error("Wrong password.", icon="⛔")
     st.stop()
 
@@ -77,6 +164,10 @@ def require_login() -> None:
 require_login()
 snap_dir = pipeline.snapshot_dir(settings)
 
+
+# --------------------------------------------------------------------------- #
+# Data access (cached by file modification time)
+# --------------------------------------------------------------------------- #
 
 def _mtime(p: Path) -> float:
     try:
@@ -90,520 +181,367 @@ def _read(path: str, mtime: float) -> dict | None:
     return pipeline.read_json(Path(path))
 
 
-def read_snapshot(path: Path) -> dict | None:
-    return _read(str(path), _mtime(path))
+def snap(name: str) -> dict | None:
+    p = snap_dir / name
+    return _read(str(p), _mtime(p))
 
 
 def ticker_snap(t: str) -> dict | None:
-    return read_snapshot(snap_dir / f"ticker_{pipeline.safe_name(t)}.json")
+    return snap(f"ticker_{pipeline.safe_name(t)}.json")
 
 
-def portfolio_snap() -> dict | None:
-    return read_snapshot(snap_dir / "portfolio.json")
+def all_ticker_snaps() -> dict[str, dict]:
+    out = {}
+    for p in sorted(snap_dir.glob("ticker_*.json")):
+        s = _read(str(p), _mtime(p))
+        if s and s.get("ticker"):
+            out[s["ticker"]] = s
+    return out
 
 
-def market_snap() -> dict | None:
-    return read_snapshot(snap_dir / "market.json")
+def now_utc() -> pd.Timestamp:
+    return pd.Timestamp.now(tz="UTC")
 
 
-def backtest_snap(t: str) -> tuple[dict | None, bool]:
-    own = read_snapshot(snap_dir / f"backtest_{pipeline.safe_name(t)}.json")
-    if own is not None:
-        return own, False
-    return read_snapshot(pipeline.REFERENCE_BACKTEST), True
-
-
-def age_text(iso: str | None) -> str:
-    if not iso:
-        return "never"
-    dt = datetime.fromisoformat(iso)
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
-    h = (datetime.now(timezone.utc) - dt).total_seconds() / 3600
-    return f"{h:.0f} h ago" if h < 48 else f"{h / 24:.0f} days ago"
-
-
-def theme() -> dict:
-    try:
-        mode = st.context.theme.type or "light"
-    except Exception:
-        mode = "light"
-    return viz.PALETTES["dark" if mode == "dark" else "light"]
-
-
-pal = theme()
-
-# --------------------------------------------------------------------------- #
-# Sidebar: ticker, page, refresh
-# --------------------------------------------------------------------------- #
-
-known = list(settings.tickers)
-for p in sorted(snap_dir.glob("ticker_*.json")):
-    s = read_snapshot(p)
-    if s and s.get("ticker") and s["ticker"] not in known:
-        known.append(s["ticker"])
-
-with st.sidebar:
-    st.title("Quarterly Forecaster")
-    ticker = st.selectbox("Ticker", known, key="ticker")
-    page = st.radio("Page", PAGES, key="page")
-    st.divider()
-    st.subheader("Data")
-    ts, ms = ticker_snap(ticker), market_snap()
-    st.caption(f"Forecast for {ticker}: {age_text(ts and ts.get('generated_at'))}  \n"
-               f"Macro, events, news: {age_text(ms and ms.get('generated_at'))}")
-    scope = st.radio("Refresh", ("Selected ticker + market", "All tickers + market"), key="scope")
-    with_bt = st.checkbox("Also re-run backtest (slow: ~5 min per ticker)", key="with_bt")
-    if st.button("Refresh data", type="primary", use_container_width=True):
-        log: list[str] = []
-        tickers = [ticker] if scope.startswith("Selected") else list(known)
-        with st.status("Refreshing…", expanded=True) as status:
-            warn = lambda m: (log.append(m), status.write(m))  # noqa: E731
-            result = pipeline.refresh_all(settings, tickers, warn=warn,
-                                          backtest_stale_days=0 if with_bt else None)
-            failed = {k: v for k, v in result.items() if v != "ok"}
-            status.update(label="Refresh finished with errors" if failed else "Refresh finished",
-                          state="error" if failed else "complete")
-        st.session_state["refresh_log"] = [f"{k}: {v}" for k, v in result.items()] + log
-        st.cache_data.clear()
-        st.rerun()
-    if st.session_state.get("refresh_log"):
-        with st.expander("Last refresh log"):
-            st.code("\n".join(st.session_state["refresh_log"]), language=None)
-    st.caption("Weekly auto-refresh: `scripts/weekly_refresh.sh` (see README).")
-    if st.button("Log out", key="logout"):
-        st.session_state.clear()
-        st.rerun()
+def esc(x) -> str:
+    return html.escape(str(x))
 
 
 # --------------------------------------------------------------------------- #
-# Banner: backtest accuracy, shown on every page
+# Shared header / footer
 # --------------------------------------------------------------------------- #
 
-def backtest_banner(t: str) -> None:
-    bt, is_ref = backtest_snap(t)
-    with st.container(border=True):
-        if bt is None:
-            st.info("No backtest yet. Run `python -m forecaster.backtest "
-                    f"{t}` or tick “Also re-run backtest” and refresh. Until then, "
-                    "treat these forecasts as unvalidated.", icon="ℹ️")
+def header(title: str) -> None:
+    now = now_utc()
+    probs = health.problems(settings.cache_dir, now, health.expected_sources(settings))
+    if probs:
+        items = "".join(f"<li>{esc(p.message)}</li>" for p in probs)
+        st.html(f'<div class="qf-banner" role="alert"><b>⚠ Data problem</b><ul style="margin:0;padding-left:18px">'
+                f"{items}</ul></div>")
+    st.markdown(f"### {title}")
+    lu = lambda s: ad.ago(health.last_updated(settings.cache_dir, s), now)  # noqa: E731
+    st.html(f'<div class="qf-muted">Last updated · prices {esc(lu("prices"))} · forecasts {esc(lu("forecasts"))}'
+            f' · macro {esc(lu("market"))}</div>')
+
+
+def model_note() -> None:
+    bt = pipeline.read_json(pipeline.REFERENCE_BACKTEST)
+    if bt:
+        m = bt["model"]
+        st.caption(f"Model check (S&P 500 backtest 2005–2022): {m['coverage']:.0%} of outcomes inside P10–P90 "
+                   f"(target 80%), skill {bt['skill']:+.1%} vs a naive baseline, within noise. "
+                   "Treat ranges as a rough guide.")
+
+
+def settings_footer() -> None:
+    with st.expander("⚙️  Refresh & account"):
+        st.caption("Prices and news refresh every 15 min, macro twice a day, and forecasts rebuild every "
+                   "Sunday at 6 pm MT, all automatically.")
+        if st.button("Refresh macro, events & portfolio now", width="stretch", key="refresh"):
+            with st.status("Refreshing…") as s:
+                res = pipeline.refresh_all(settings, warn=s.write, forecasts=False)
+                s.update(label="Done" if all(v == "ok" for v in res.values()) else "Finished with errors",
+                         state="complete")
+            st.cache_data.clear()
+            st.rerun()
+        if st.button("Log out", width="stretch", key="logout"):
+            st.session_state.clear()
+            st.rerun()
+
+
+# --------------------------------------------------------------------------- #
+# Tabs
+# --------------------------------------------------------------------------- #
+
+def chip(k: str, v: str, d: str = "") -> str:
+    return (f'<div class="qf-chip"><div class="k">{esc(k)}</div><div class="v">{esc(v)}</div>'
+            f'<div class="d">{esc(d)}</div></div>')
+
+
+def quote_chips(prices: dict | None, symbols: list[tuple[str, str]], extra=()) -> str:
+    q = (prices or {}).get("quotes") or {}
+    chips = []
+    for sym, label in symbols:
+        x = q.get(sym)
+        if not x:
+            chips.append(f'<div class="qf-chip"><div class="k">{esc(label)}</div><div class="v">n/a</div></div>')
+            continue
+        if x.get("price_cad") is not None and sym not in ("^VIX", "CAD=X"):
+            val = f"C${x['price_cad']:,.2f}"
+        elif sym == "CAD=X":
+            val = f"{x['price']:.4f}"
+        else:
+            val = f"{x['price']:.2f}"
+        chg = "" if x.get("change") is None else f"{x['change']:+.2%} today"
+        chips.append(f'<div class="qf-chip"><div class="k">{esc(label)}</div><div class="v">{esc(val)}</div>'
+                     f'<div class="d">{esc(chg)}</div></div>')
+    chips += [chip(*e) for e in extra]
+    return '<div class="qf-row">' + "".join(chips) + "</div>"
+
+
+def fan_block(t: str, label: str) -> None:
+    s = ticker_snap(t)
+    st.markdown(f"**{label}**")
+    if not s or not s.get("forecast"):
+        st.caption("No forecast yet: it rebuilds every Sunday at 6 pm MT.")
+        return
+    st.plotly_chart(viz.fan_chart(s, PAL, compact=True), width="stretch",
+                    config={"displayModeBar": False, "scrollZoom": False}, key=f"fan_{t}")
+    f = s["forecast"][-1]
+    st.caption(f"{f['quarter']}: likely range {viz.money(f['p10'], s, 0)} – {viz.money(f['p90'], s, 0)}, "
+               f"middle {viz.money(f['p50'], s, 0)} (from {viz.money(s['last_close'], s, 0)}). "
+               "Blue band = P10–P90; dashed = P50.")
+
+
+def tab_week() -> None:
+    header("This Week")
+    snaps, market, prices = all_ticker_snaps(), snap("market.json"), snap("prices.json")
+    reg = ad.regime_of(snaps.get("SPY"))
+    vix = ((prices or {}).get("quotes") or {}).get("^VIX")
+    reg_txt = f"{ad.REGIME_WORDS.get(reg[0], reg[0]).capitalize()} · {reg[1]:.0%}" if reg else "n/a"
+    vix_txt = f"{vix['price']:.1f}" if vix else "n/a"
+    vix_d = "" if not vix or vix.get("change") is None else f"{vix['change']:+.1%} today"
+    lines = "".join(f"<p>{esc(x)}</p>" for x in ad.outlook_lines(snaps, market, prices, now_utc()))
+    st.html(f"""<div class="qf-card">
+      <div class="qf-row">
+        <div class="qf-chip"><div class="k">Market regime (SPY)</div><div class="v">{esc(reg_txt)}</div></div>
+        <div class="qf-chip"><div class="k">VIX</div><div class="v">{esc(vix_txt)}</div><div class="d">{esc(vix_d)}</div></div>
+      </div>
+      <div class="qf-outlook">{lines}</div>
+    </div>""")
+    st.html(quote_chips(prices, [("SPY", "SPY"), ("QQQ", "QQQ"), ("GC=F", "Gold")]))
+    for t, label in (("SPY", "S&P 500 (SPY) · CAD"), ("QQQ", "Nasdaq 100 (QQQ) · CAD"), ("GC=F", "Gold · CAD")):
+        fan_block(t, label)
+    model_note()
+
+
+IMPACT = {"high": ("critical", "High"), "medium": ("warning", "Medium"), "low": ("good", "Low")}
+
+
+def tab_calendar() -> None:
+    header("Calendar")
+    st.caption("Next 14 days: CPI, PPI, FOMC, jobs, GDP and earnings, with typical release times in New York "
+               "time (ET; Mountain time is 2 h earlier). Countdowns update every minute.")
+
+    @st.fragment(run_every="60s")
+    def events() -> None:
+        items = ad.calendar_items(snap("market.json"), now_utc(), days=14)
+        if not items:
+            st.info("No events in the next 14 days (or the events snapshot hasn't been built yet).", icon="ℹ️")
             return
-        m, b = bt["model"], bt["baseline"]
-        span = f"{str(bt.get('first_target') or bt['first_origin'])[:4]}–{str(bt['last_target'])[:4]}"
-        title = (f"Backtest accuracy: reference S&P 500 run ({span}), not {t}" if is_ref
-                 else f"Backtest accuracy: {t} ({span})")
-        st.markdown(f"**{title}** · {bt['n_origins']} quarterly origins, {bt['n_forecasts']} scored forecasts")
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Outcomes inside P10–P90", f"{m['coverage']:.0%}", help="Target ≈ 80%.")
-        c1.caption(f"target 80% · baseline {b['coverage']:.0%}")
-        lo, hi = bt["diff_ci"]
-        c2.metric("Pinball skill vs naive baseline", f"{bt['skill']:+.1%}",
-                  help="1 − model loss / baseline loss; > 0 means better than the historical-average baseline.")
-        c2.caption("90% CI " + ("excludes" if (hi < 0 or lo > 0) else "includes") + " zero")
-        c3.metric("Direction hit rate", f"{m['hit_rate']:.0%}")
-        c3.caption(f"baseline (≈ always up) {b['hit_rate']:.0%}")
-        c4.metric("Drawdown-probability Brier", f"{m['brier_dd']:.3f}", help="Lower is better.")
-        c4.caption(f"baseline {b['brier_dd']:.3f} · lower is better")
-        if bt["beats_baseline"]:
-            st.success("Beats the naive baseline with a 90% CI that excludes zero.", icon="✅")
-        elif bt["worse_than_baseline"]:
-            st.error("Worse than the naive historical-average baseline. Don't rely on these forecasts.", icon="⛔")
-        else:
-            st.warning("Not reliably better than a naive historical-average baseline: the edge is within noise. "
-                       "Use the ranges as a rough guide, not a signal.", icon="⚠️")
-        if is_ref:
-            st.caption(f"No backtest for {t} yet. {bt.get('note', '')}")
-        with st.expander("Backtest details"):
-            for v in bt["verdict"]:
-                st.markdown(f"- {v}")
+        out = []
+        for it in items:
+            col, word = IMPACT.get(it.impact, ("good", it.impact.title()))
+            et = it.when.tz_convert(ad.NY)
+            tick = f" · {esc(it.ticker)}" if it.ticker else ""
+            out.append(f"""<div class="qf-item" style="border-left-color:{STATUS[col]}">
+              <div><div class="t">{esc(it.name)}{tick}</div>
+              <div class="s">{et:%a %b %d · %H:%M} ET{(' · ' + esc(it.detail)) if it.detail else ''}</div></div>
+              <div class="r"><span class="qf-badge" style="background:{STATUS[col]}">{word}</span>
+              <div style="margin-top:4px">{esc(it.countdown)}</div></div></div>""")
+        st.html("".join(out))
+    events()
+    model_note()
 
 
-# --------------------------------------------------------------------------- #
-# Pages
-# --------------------------------------------------------------------------- #
-
-def page_forecast(t: str) -> None:
-    snap = ticker_snap(t)
-    if snap is None:
-        st.info(f"No forecast for {t} yet. Press **Refresh data** in the sidebar, or run "
-                f"`python -m forecaster.pipeline {t}`.", icon="ℹ️")
-        return
-    as_of = pd.Timestamp(snap["as_of"])
-    st.subheader(f"{t}: 4-quarter forecast range")
-    st.caption(f"As of {as_of:%b %d, %Y} · last close {viz.money(snap['last_close'], snap)} "
-               f"({viz.unit(snap)}) · {snap['model']} · generated {age_text(snap['generated_at'])}  \n"
-               f"{viz.currency_note(snap)}")
-    if (pd.Timestamp.today() - as_of).days > 10:
-        st.warning(f"Price data ends {as_of:%b %d, %Y}; refresh for an up-to-date forecast.", icon="⚠️")
-
-    st.plotly_chart(viz.fan_chart(snap, pal), use_container_width=True)
-    tbl = viz.forecast_table(snap)
-    st.dataframe(
-        tbl, hide_index=True, use_container_width=True,
-        column_config={
-            **{c: st.column_config.NumberColumn(c, format="%.2f") for c in tbl.columns if c[:3] in ("P10", "P50", "P90") and "%" not in c},
-            **{c: st.column_config.NumberColumn(c, format="percent") for c in ("P10 %", "P50 %", "P90 %")},
-            "P(>10% drawdown by then)": st.column_config.ProgressColumn(
-                "P(>10% drawdown by then)", min_value=0.0, max_value=1.0, format="percent"),
-        })
-    st.caption("Ranges, not predictions: each quarter-end price should land between P10 and P90 about "
-               "80% of the time if the model is calibrated (see the backtest above). The drawdown "
-               "probability overstated risk at the high end in the backtest.")
-
-    left, right = st.columns([1, 2])
-    with left:
-        st.markdown("**Current regime (HMM, filtered)**")
-        reg = snap["regime"]["current"]
-        for k, name in (("bull", "Bull"), ("bear", "Bear"), ("high_vol", "High volatility")):
-            st.progress(float(reg[k]), text=f"{name}: {reg[k]:.0%}")
-        st.caption("Annualised drift by regime: " + ", ".join(
-            f"{k.replace('_', '-')} {v:+.0%}" for k, v in snap["regime"]["drift_annualized"].items())
-            + ". Labels are assigned by rule: “high volatility” is the most volatile state and “bear” "
-              "is the lower-return of the two calmer states, so “bear” can still have positive drift.")
-        g = snap.get("garch") or {}
-        if g.get("persistence") is not None:
-            st.caption(f"GARCH persistence {g['persistence']:.3f} · long-run vol {g['long_run_vol']:.0%}")
-    with right:
-        st.markdown("**What drives the LightGBM part (SHAP)**")
-        if not snap["drivers"]:
-            st.info("LightGBM wasn't used for this forecast (not enough training history), so there are "
-                    "no SHAP drivers.", icon="ℹ️")
-        else:
-            c1, c2 = st.columns(2)
-            quarter = c1.selectbox("Quarter", [f["quarter"] for f in snap["forecast"]], key="shap_q")
-            qlev = c2.selectbox("Quantile", list(QUANTILE_LABELS), index=1,
-                                format_func=QUANTILE_LABELS.get, key="shap_level")
-            st.plotly_chart(viz.shap_chart(snap["drivers"], quarter, qlev, pal), use_container_width=True)
-            st.caption("Blue raises the forecast, red lowers it. These explain the LightGBM model only, "
-                       f"which has {snap['weights']['lgb']:.0%} weight in the blend. The backtest found it "
-                       "overconfident and prone to fitting noise, so read drivers as the model's reasoning, "
-                       "not established causes.")
+VERDICT = {"TAKE": "good", "CAUTION": "warning", "SKIP": "critical"}
 
 
-def _metric(col, label: str, rows: list[dict], key: str, unit: str) -> None:
-    if not rows:
-        col.metric(label, "n/a")
-        return
-    df = pd.DataFrame(rows).dropna(subset=[key])
-    if df.empty:
-        col.metric(label, "n/a")
-        return
-    cur, prev = df.iloc[-1], df.iloc[-2] if len(df) > 1 else None
-    delta = None if prev is None else f"{round(cur[key] - prev[key], 2) + 0.0:+.2f} {unit} vs prior month"
-    col.metric(label, f"{cur[key]:.2f}{'%' if unit == 'pp' else ''}", delta, delta_color="off")
-    col.caption(f"latest: {pd.Timestamp(cur['date']):%b %Y}")
-
-
-def page_macro(t: str) -> None:
-    ms = market_snap()
-    if ms is None:
-        st.info("No macro/events snapshot yet. Press **Refresh data**.", icon="ℹ️")
-        return
-    for w in ms.get("warnings", []):
-        if "FRED" in w or "FINNHUB" in w:
-            st.warning(w, icon="⚠️")
-    mh = ms.get("macro_history") or {}
-    st.subheader("Macro")
-    c1, c2, c3, c4 = st.columns(4)
-    _metric(c1, "CPI, YoY", mh.get("CPIAUCSL", []), "yoy", "pp")
-    _metric(c2, "Core CPI, YoY", mh.get("CPILFESL", []), "yoy", "pp")
-    _metric(c3, "PPI, YoY", mh.get("PPIACO", []), "yoy", "pp")
-    _metric(c4, "Fed funds rate", mh.get("FEDFUNDS", []), "value", "pp")
-    if mh:
-        a, b = st.columns(2)
-        a.markdown("**Inflation, % year over year**")
-        a.plotly_chart(viz.macro_chart(mh, [("CPIAUCSL", "yoy", "CPI"), ("PPIACO", "yoy", "PPI")], pal,
-                                       "% YoY"), use_container_width=True)
-        b.markdown("**Fed funds rate, %**")
-        b.plotly_chart(viz.macro_chart(mh, [("FEDFUNDS", "value", "Fed funds")], pal, "%"),
-                       use_container_width=True)
-        st.caption("Latest revised values from FRED, for display. The forecast model uses first-release "
-                   "values keyed to their publication dates.")
-
-    st.subheader("Next 90 days: scheduled events")
-    ev = pd.DataFrame(ms.get("events") or [])
-    high_only = st.toggle("High-impact only", value=True, key="high_only")
-    if ev.empty:
-        st.info("No events in the snapshot.", icon="ℹ️")
+def tab_gold() -> None:
+    header("Gold VWAP")
+    prices = snap("prices.json")
+    g = ((prices or {}).get("quotes") or {}).get("GC=F")
+    if g:
+        z = g.get("z")
+        ztxt = "n/a (early in session)" if z is None else f"{z:+.1f} st. dev."
+        vw = f"VWAP {g['vwap']:,.2f} USD" if g.get("vwap") else ""
+        st.html(quote_chips(prices, [("GC=F", "Gold (GC=F)")], extra=[("vs session VWAP", ztxt, vw)]))
+    j = ad.gold_journal(settings.cache_dir / "alerts.sqlite")
+    st.markdown("**Journal win rate**")
+    if j["stats"]:
+        rows = []
+        for r in j["stats"]:
+            rows.append({"Verdict": f'{r["verdict"]} · {r["horizon"]}', "n": r["n"],
+                         "Win rate": 100 * r["win_rate"], "Avg": 100 * r["avg_ret"]})
+        st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch", column_config={
+            "Verdict": st.column_config.TextColumn("Verdict · after", width="small"),
+            "n": st.column_config.NumberColumn("Trades", width="small"),
+            "Win rate": st.column_config.ProgressColumn(min_value=0.0, max_value=100.0, format="%.0f%%", width="small"),
+            "Avg": st.column_config.NumberColumn("Avg move", format="%+.2f%%", width="small")})
+        st.caption("Win = the trade's direction paid off at that horizon, measured on GC=F from the alert time. "
+                   "Small samples are noisy: compare TAKE with SKIP before trusting the filters.")
     else:
-        ev["date"] = pd.to_datetime(ev["date"])
-        today = pd.Timestamp.today().normalize()
-        ev = ev[(ev["date"] >= today) & (ev["date"] <= today + pd.Timedelta(days=90))]
-        if high_only:
-            ev = ev[ev["impact"] == "high"]
-        ev = ev.sort_values(["date", "points"], ascending=[True, False])
-        if ev.empty:
-            st.info("Nothing scheduled in the next 90 days for this filter (the snapshot may be old).", icon="ℹ️")
-        else:
-            show = pd.DataFrame({
-                "Date": ev["date"].dt.date, "In": (ev["date"] - today).dt.days.astype(str) + " d",
-                "Event": ev["name"], "Impact": ev["impact"].str.capitalize(),
-                "Ticker": ev["ticker"].fillna(""), "Detail": ev["detail"].fillna(""), "Source": ev["source"]})
-            st.dataframe(show, hide_index=True, use_container_width=True)
-
-    rd = ms.get("risk_density") or []
-    if rd:
-        st.subheader("Event risk density by quarter")
-        st.plotly_chart(viz.risk_density_chart(rd, pal), use_container_width=True)
-        missing = [r for r in rd if r.get("missing")]
-        if missing:
-            st.caption("Lower bound where some releases aren't scheduled yet: " + "; ".join(
-                f"{r['quarter']} missing {r['missing']}" for r in missing))
+        st.caption("No resolved outcomes yet: win rates appear 1 h / 4 h / 1 day after alerts arrive.")
+    st.markdown(f"**Latest alerts** · {j['n_alerts']} total")
+    if not j["alerts"]:
+        st.info("No TradingView alerts yet. They appear here as soon as the webhook receives one.", icon="ℹ️")
+    out = []
+    now = now_utc()
+    for a in j["alerts"]:
+        col = STATUS[VERDICT.get(a["verdict"], "warning")]
+        reasons = "; ".join(a["reasons"][:2]) if a["reasons"] else ""
+        t = pd.Timestamp(a["alert_time"])
+        out.append(f"""<div class="qf-item" style="border-left-color:{col}">
+          <div style="min-width:0"><div class="t">{esc(a['side'].upper())} {esc(a['ticker'])} @ {a['price']:,.2f}</div>
+          <div class="s">{esc(a['strategy'])} · {esc(ad.ago(t, now))}</div>
+          <div class="s" style="white-space:normal">{esc(reasons)}</div></div>
+          <div class="r"><span class="qf-badge" style="background:{col}">{esc(a['verdict'])}</span></div></div>""")
+    if out:
+        st.html("".join(out))
+    model_note()
 
 
-def page_sentiment(t: str) -> None:
-    ms = market_snap()
-    if ms is None:
-        st.info("No news snapshot yet. Press **Refresh data**.", icon="ℹ️")
-        return
-    sent = ms.get("sentiment") or {}
-    if not sent:
-        st.info("No scored headlines yet. News needs FINNHUB_API_KEY, and scoring needs FinBERT "
-                "(`pip install -r requirements-ml.txt`). History builds up with each refresh.", icon="ℹ️")
-        return
-
-    def last_week(tag: str) -> tuple[float, int]:
-        df = pd.DataFrame(sent.get(tag) or [])
-        if df.empty:
-            return float("nan"), 0
-        df["date"] = pd.to_datetime(df["date"])
-        w = df[df["date"] >= df["date"].max() - pd.Timedelta(days=6)]
-        n = int(w["headlines"].sum())
-        return float((w["sentiment"] * w["headlines"]).sum() / n) if n else float("nan"), n
-
-    st.subheader("News sentiment (FinBERT)")
-    cols = st.columns(2)
-    for col, tag, name in ((cols[0], "MARKET", "Market"), (cols[1], t.upper(), t)):
-        v, n = last_week(tag)
-        with col:
-            if n == 0:
-                st.metric(f"{name}: 7-day sentiment", "n/a")
-                st.caption("No headlines for this tag yet (indices/ETFs have no company news).")
-            else:
-                st.plotly_chart(viz.sentiment_gauge(v, pal, f"{name}: 7-day sentiment"),
-                                use_container_width=True)
-                st.caption(f"{viz.describe_sentiment(v)} · {n} headlines · scale −1 (all negative) to +1")
-    if sent.get("MARKET"):
-        st.markdown("**Market sentiment, daily**")
-        st.plotly_chart(viz.sentiment_trend(sent["MARKET"], pal), use_container_width=True)
-    shocks = ms.get("shocks") or []
-    if shocks:
-        st.caption("Recent shocks (|z| > 2 vs prior 30 news days; about 5% of quiet days trigger by chance): " +
-                   "; ".join(f"{s['tag']} {str(s['date'])[:10]} ({s['sentiment']:+.2f})" for s in shocks[:6]))
-
-    st.subheader("Top headlines")
-    h = pd.DataFrame(ms.get("headlines") or [])
-    if h.empty:
-        st.info("No recent headlines.", icon="ℹ️")
-        return
-    tags = ["MARKET"] + sorted(set(h["tag"]) - {"MARKET"})
-    c1, c2 = st.columns(2)
-    tag = c1.selectbox("Source", tags, index=tags.index(t.upper()) if t.upper() in tags else 0,
-                       format_func=lambda x: "Market (general)" if x == "MARKET" else x, key="h_tag")
-    order = c2.radio("Sort", ("Most recent", "Most negative", "Most positive"), horizontal=True, key="h_sort")
-    f = h[h["tag"] == tag]
-    f = (f.sort_values("ts", ascending=False) if order == "Most recent" else
-         f.sort_values("sentiment", ascending=order == "Most negative"))
-    st.dataframe(
-        f.head(15).assign(date=pd.to_datetime(f["date"]).dt.date)[["date", "source", "headline", "sentiment", "url"]],
-        hide_index=True, use_container_width=True,
-        column_config={
-            "date": "Date", "source": "Source", "headline": st.column_config.TextColumn("Headline", width="large"),
-            "sentiment": st.column_config.NumberColumn("Score", format="%+.2f",
-                                                       help="P(positive) − P(negative), −1 to +1"),
-            "url": st.column_config.LinkColumn("Link", display_text="open"),
-        })
-
-
-def page_portfolio(_t: str) -> None:
-    ps = portfolio_snap()
+def tab_portfolio() -> None:
+    header("Portfolio")
+    ps = snap("portfolio.json")
     if ps is None:
-        st.info("No portfolio snapshot yet. Copy `portfolio.example.yaml` to `portfolio.yaml`, enter your "
-                "holdings, then press **Refresh data** (or run `python -m forecaster.pipeline`). "
-                "portfolio.yaml is gitignored, so your holdings are never committed.", icon="ℹ️")
+        st.info("No portfolio yet. Copy `portfolio.example.yaml` to `portfolio.yaml`, enter your holdings, and it "
+                "appears after the next refresh (or use ⚙️ below).", icon="ℹ️")
+        settings_footer()
         return
-    as_of = pd.Timestamp(ps["as_of"])
-    st.subheader("Portfolio (CAD)")
-    st.caption(f"As of {as_of:%b %d, %Y} · USD converted at USD/CAD {ps['usd_cad']:.4f}")
-    for w in ps.get("warnings", []):
-        st.warning(w, icon="⚠️")
+    pnl_pct = ps.get("total_pnl_pct")
+    vol = (ps.get("risk") or {}).get("volatility")
+    st.html(f"""<div class="qf-row">
+      <div class="qf-chip"><div class="k">Value</div><div class="v">C${ps['total_value']:,.0f}</div></div>
+      <div class="qf-chip"><div class="k">P&amp;L</div><div class="v">{'+' if ps['total_pnl'] >= 0 else '-'}C${abs(ps['total_pnl']):,.0f}</div>
+        <div class="d">{'' if pnl_pct is None else f'{pnl_pct:+.1%} on cost'}</div></div>
+      <div class="qf-chip"><div class="k">Volatility</div><div class="v">{'n/a' if vol is None else f'{vol:.1%}'}</div></div>
+    </div>""")
     for f in ps.get("flags", []):
         st.warning(f["message"], icon="⚠️")
-
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Market value", f"C${ps['total_value']:,.0f}")
-    pnl_pct = ps.get("total_pnl_pct")
-    c2.metric("Unrealised P&L", f"C${ps['total_pnl']:+,.0f}",
-              None if pnl_pct is None else f"{pnl_pct:+.1%} on cost C${ps['total_cost']:,.0f}", delta_color="normal")
-    r = ps.get("risk")
-    if r:
-        c3.metric("Volatility (annualised)", f"{r['volatility']:.1%}")
-        c3.caption(f"{r['n_days']} common trading days of CAD returns")
-        betas = r["beta"]
-        c4.metric("Beta vs S&P/TSX 60", f"{betas.get('XIU.TO', float('nan')):.2f}")
-        c4.caption(f"vs S&P 500 in CAD: {betas.get('SPY', float('nan')):.2f}")
-    else:
-        c3.metric("Volatility", "n/a")
-        c4.metric("Beta", "n/a")
-
-    st.markdown("**Holdings**")
     h = pd.DataFrame(ps["holdings"])
-    show = pd.DataFrame({
-        "Ticker": h["ticker"], "Name": h["name"], "Account": h["account"], "Class": h["class"],
-        "Shares": h["shares"].map(lambda x: "" if pd.isna(x) else f"{x:,.4g}"),
-        "Price": [("C$" if c == "CAD" else "US$") + f"{p:,.2f}" if pd.notna(p) else "" for c, p in zip(h["currency"], h["price"])],
-        "Value (CAD)": h["market_value"], "Weight": h["weight"],
-        "P&L (CAD)": h["pnl"], "P&L %": h["pnl_pct"], "Note": h["note"].fillna("")})
-    st.dataframe(show, hide_index=True, use_container_width=True, column_config={
-        "Value (CAD)": st.column_config.NumberColumn(format="%.2f"),
-        "P&L (CAD)": st.column_config.NumberColumn(format="%+.2f"),
-        "P&L %": st.column_config.NumberColumn(format="percent"),
-        "Weight": st.column_config.ProgressColumn(min_value=0.0, max_value=1.0, format="percent")})
-
-    a, b = st.columns(2)
-    alloc = ps["allocation"]
-    a.markdown("**By asset class**")
-    a.plotly_chart(viz.allocation_chart(alloc["asset_class"], pal), use_container_width=True)
-    b.markdown("**By sector (ETFs looked through)**")
-    b.plotly_chart(viz.allocation_chart(alloc["sector"], pal), use_container_width=True)
-    a.markdown("**By account**")
-    a.plotly_chart(viz.allocation_chart(alloc["account"], pal), use_container_width=True)
-    b.markdown("**By region**")
-    b.plotly_chart(viz.allocation_chart(alloc["region"], pal), use_container_width=True)
-
-    if r:
-        st.markdown("**Risk by holding**")
-        rh = pd.DataFrame(r["holdings"])
-        st.dataframe(pd.DataFrame({
-            "Ticker": rh["ticker"], "Weight": rh["weight"], "Volatility": rh["volatility"],
-            "Beta vs TSX 60": rh["beta_XIU.TO"], "Beta vs S&P 500 (CAD)": rh["beta_SPY"],
-            "Share of portfolio risk": rh["risk_share"]}), hide_index=True, use_container_width=True,
-            column_config={"Weight": st.column_config.NumberColumn(format="percent"),
-                           "Volatility": st.column_config.NumberColumn(format="percent"),
-                           "Beta vs TSX 60": st.column_config.NumberColumn(format="%.2f"),
-                           "Beta vs S&P 500 (CAD)": st.column_config.NumberColumn(format="%.2f"),
-                           "Share of portfolio risk": st.column_config.NumberColumn(format="percent")})
-        st.caption("Share of risk = the holding's contribution to portfolio variance; it can exceed its weight "
-                   "for volatile holdings. USD holdings' volatility includes the USD/CAD moves.")
-
-    st.subheader("Portfolio value: next 4 quarters")
-    if not ps["forecast"]:
-        st.info("Forecast unavailable (see warnings above).", icon="ℹ️")
-        return
-    st.plotly_chart(viz.fan_chart(ps, pal), use_container_width=True)
-    ft = pd.DataFrame(ps["forecast"])
-    st.dataframe(pd.DataFrame({
-        "Quarter": ft["quarter"], "Target date": pd.to_datetime(ft["target_date"]).dt.date,
-        "P10 (CAD)": ft["p10"], "P50 (CAD)": ft["p50"], "P90 (CAD)": ft["p90"],
-        "P(below today)": ft["prob_loss"], "P(>10% drawdown by then)": ft["prob_drawdown"]}),
-        hide_index=True, use_container_width=True, column_config={
-            **{c: st.column_config.NumberColumn(format="%.0f") for c in ("P10 (CAD)", "P50 (CAD)", "P90 (CAD)")},
-            "P(below today)": st.column_config.NumberColumn(format="percent"),
-            "P(>10% drawdown by then)": st.column_config.ProgressColumn(min_value=0.0, max_value=1.0, format="percent")})
-    sim = ps.get("simulation") or {}
-    st.caption(f"Method: {ps['forecast_method']}. Paths replay blocks of real joint daily returns since "
-               f"{str(sim.get('history_start'))[:10]}, so correlations, fat tails and the USD/CAD effect come "
-               "from history. Holdings stay fixed (no rebalancing or contributions). The P50 inherits that "
-               "window's drift, so a strong decade makes it optimistic. This is not the ensemble model, and it "
-               "hasn't been backtested.")
+    out = []
+    for _, r in h.iterrows():
+        pnl = "" if r["ticker"] == "CASH" else f"{'+' if r['pnl'] >= 0 else '-'}C${abs(r['pnl']):,.0f} ({r['pnl_pct']:+.1%})"
+        out.append(f"""<div class="qf-item" style="border-left-color:{PAL['s1']}">
+          <div style="min-width:0"><div class="t">{esc(r['ticker'])}</div><div class="s">{esc(r['account'])} · {r['weight']:.1%}</div></div>
+          <div class="r">C${r['market_value']:,.0f}<div class="s">{esc(pnl)}</div></div></div>""")
+    st.html("".join(out))
+    view = st.radio("Allocation", ["asset_class", "sector", "account", "region"], horizontal=True, key="alloc",
+                    format_func=lambda k: {"asset_class": "Class", "sector": "Sector", "account": "Account",
+                                           "region": "Region"}[k])
+    st.plotly_chart(viz.allocation_chart(ps["allocation"][view], PAL), width="stretch",
+                    config={"displayModeBar": False}, key="alloc_chart")
+    if ps.get("forecast") and "p10" in ps["forecast"][0]:
+        st.markdown("**Forecast range (CAD)**")
+        st.plotly_chart(viz.fan_chart(ps, PAL, compact=True), width="stretch",
+                        config={"displayModeBar": False}, key="pf_fan")
+        f = ps["forecast"][-1]
+        st.caption(f"{f['quarter']}: likely C${f['p10']:,.0f} – C${f['p90']:,.0f}, middle C${f['p50']:,.0f}; "
+                   f"{f.get('prob_loss', 0):.0%} chance of being below today. Joint bootstrap of your holdings' "
+                   "history, buy-and-hold, not backtested.")
+    with st.expander("💡 Plan a contribution"):
+        planner_block(ps)
+    settings_footer()
 
 
-def page_planner(_t: str) -> None:
+def planner_block(ps: dict) -> None:
     from forecaster import planner as pl
 
-    st.subheader("Contribution planner (CAD)")
-    st.caption("Splits each contribution toward your target allocation by buying what's most underweight. "
-               "Buy-only: it never sells, never uses leverage, margin or options, and the suggested buys "
-               "always add up to exactly your contribution.")
-    ps = portfolio_snap()
-    if ps is None:
-        st.info("Needs your holdings: create `portfolio.yaml` (see `portfolio.example.yaml`) and press "
-                "**Refresh data**.", icon="ℹ️")
-        return
+    st.caption("Splits a contribution toward your target allocation by buying what's most underweight. "
+               "Buy-only: it never sells, never uses leverage, margin or options, and the buys always add up "
+               "to exactly your contribution.")
     h = pd.DataFrame(ps["holdings"])
     held = h[h["ticker"] != "CASH"]
     current = held.groupby("ticker")["market_value"].sum().to_dict()
     prices = held.groupby("ticker")["price_cad"].last().to_dict()
-    names = held.groupby("ticker")["name"].last().to_dict()
-    snaps = {}
-    for p in sorted(snap_dir.glob("ticker_*.json")):
-        s = read_snapshot(p)
-        if s and s.get("ticker"):
-            snaps[s["ticker"]] = s
-            if s.get("currency") == "CAD" and s["ticker"] not in prices and not s.get("converted_from"):
-                prices[s["ticker"]] = s["last_close"]
+    names = held.groupby("ticker")["name"].last().to_dict() if "name" in held else {}
+    snaps = all_ticker_snaps()
+    for t, s in snaps.items():
+        if s.get("currency") == "CAD" and t not in prices and not s.get("converted_from"):
+            prices[t] = s["last_close"]
     defaults = ps.get("planner") or {}
     inv = sum(current.values())
     default_targets = defaults.get("targets") or (
         {t: round(v / inv * 100, 1) for t, v in current.items()} if inv else {})
-
-    c1, c2 = st.columns([1, 2])
-    amount = c1.number_input("Monthly contribution (CAD)", min_value=0.0, step=50.0,
+    amount = st.number_input("Monthly contribution (CAD)", min_value=0.0, step=50.0,
                              value=float(defaults.get("monthly_amount") or 500.0), key="pl_amount")
-    whole = c1.checkbox("Whole shares only", value=False, key="pl_whole",
+    whole = st.checkbox("Whole shares only", value=False, key="pl_whole",
                         help="Leave unticked if your broker supports fractional shares.")
-    c1.caption("Defaults come from the `planner:` section of portfolio.yaml.")
-    edited = c2.data_editor(
-        pd.DataFrame({"Ticker": list(default_targets), "Target %": [float(v) * (100 if sum(default_targets.values()) <= 1.01 else 1)
-                                                                    for v in default_targets.values()]}),
-        num_rows="dynamic", hide_index=True, use_container_width=True, key="pl_targets",
+    scale = 100 if sum(default_targets.values()) <= 1.01 else 1
+    edited = st.data_editor(
+        pd.DataFrame({"Ticker": list(default_targets), "Target %": [float(v) * scale for v in default_targets.values()]}),
+        num_rows="dynamic", hide_index=True, width="stretch", key="pl_targets",
         column_config={"Target %": st.column_config.NumberColumn(min_value=0.0, max_value=100.0, step=1.0, format="%.1f")})
     targets = {str(r["Ticker"]).strip().upper(): float(r["Target %"] or 0) for _, r in edited.iterrows()
                if str(r["Ticker"] or "").strip()}
-    c2.caption(f"Targets add up to {sum(targets.values()):.1f}% (must be 100%).")
-
+    st.caption(f"Targets add up to {sum(targets.values()):.1f}% (must be 100%). Defaults come from the "
+               "`planner:` section of portfolio.yaml.")
     try:
         plan = pl.plan_contribution(current, targets, amount, prices, whole_shares=whole, names=names)
     except pl.PlannerError as exc:
         st.error(str(exc), icon="⛔")
         return
-
     r = plan.rows
-    st.markdown("**Suggested split for this contribution**")
+    st.markdown("**Suggested split**")
     st.dataframe(pd.DataFrame({
-        "Ticker": r["ticker"], "Now (CAD)": r["current_value"], "Now %": r["current_weight"],
-        "Target %": r["target_weight"], "Buy (CAD)": r["buy"],
+        "Ticker": r["ticker"], "Buy (CAD)": r["buy"],
         "≈ Shares": [("" if s is None or b <= 0 else (f"{s:,.0f}" if whole else f"{s:,.2f}"))
                      for s, b in zip(r["shares"], r["buy"])],
-        "After %": r["weight_after"], "Gap after (pts)": r["drift_after"] * 100}),
-        hide_index=True, use_container_width=True, column_config={
-            "Now (CAD)": st.column_config.NumberColumn(format="%.0f"),
+        "Now %": r["current_weight"], "Target %": r["target_weight"], "After %": r["weight_after"]}),
+        hide_index=True, width="stretch", column_config={
             "Buy (CAD)": st.column_config.NumberColumn(format="%.2f"),
-            **{c: st.column_config.NumberColumn(format="percent") for c in ("Now %", "Target %", "After %")},
-            "Gap after (pts)": st.column_config.NumberColumn(format="%+.1f")})
-    m1, m2, m3 = st.columns(3)
-    m1.metric("Largest gap to target", f"{plan.max_drift_after:.1%}", f"{(plan.max_drift_after - plan.max_drift_before) * 100:+.1f} pts",
-              delta_color="inverse")
-    m2.metric("Months to within 1 pt of target",
-              "already there" if plan.months_to_target == 0 else ("10+ years" if plan.months_to_target is None else str(plan.months_to_target)))
-    m2.caption("at this contribution, if prices don't move")
-    m3.metric("Not invested (rounding)", f"C${plan.leftover:,.2f}")
+            **{c: st.column_config.NumberColumn(format="percent") for c in ("Now %", "Target %", "After %")}})
+    months = ("already there" if plan.months_to_target == 0 else
+              ("10+ years" if plan.months_to_target is None else f"{plan.months_to_target} months"))
+    st.caption(f"Largest gap to target after this buy: {plan.max_drift_after:.1%} "
+               f"(was {plan.max_drift_before:.1%}). Within 1 pt of target: {months} at this amount if prices "
+               f"don't move. Not invested (rounding): C${plan.leftover:,.2f}.")
     for n in plan.notes:
         st.caption(n)
-    st.caption("The split minimises the total distance to target in dollars, so the biggest gaps fill first. "
-               "A small target can get nothing this month and be picked up once the larger gaps shrink.")
-    st.caption("The split is by ticker across all accounts. Which account to buy in (TFSA, FHSA, RRSP or "
-               "non-registered) depends on your contribution room, which isn't tracked here.")
-
+    st.caption("The split is by ticker across all accounts; which account to buy in depends on your "
+               "contribution room, which isn't tracked here.")
     st.markdown("**Timing check**")
-    flags = pl.risk_flags(list(plan.rows["ticker"]), snaps, ps, market_snap(), pd.Timestamp.today())
+    market = snap("market.json")
+    flags = pl.risk_flags(list(r["ticker"]), snaps, ps, market, pd.Timestamp.today())
     if flags:
         for f in flags:
             st.warning(f["message"], icon="⚠️")
-        sched = pl.tranche_schedule(amount - plan.leftover, pd.Timestamp.today(), market_snap(), n=pl.PlannerConfig().tranches)
+        sched = pl.tranche_schedule(amount - plan.leftover, pd.Timestamp.today(), market, n=pl.PlannerConfig().tranches)
         st.markdown(f"You could split this buy into {len(sched)} weekly parts, on days without "
                     "high-impact events. Each part uses the same split:")
         st.dataframe(pd.DataFrame({"Date": [d["date"].date() for d in sched], "Amount (CAD)": [d["amount"] for d in sched]}),
-                     hide_index=True, column_config={"Amount (CAD)": st.column_config.NumberColumn(format="%.2f")})
+                     hide_index=True, width="stretch",
+                     column_config={"Amount (CAD)": st.column_config.NumberColumn(format="%.2f")})
     else:
         st.success("No elevated drawdown, volatility, VIX or event-risk flags: one buy is fine by these checks.", icon="✅")
-    st.caption("These flags are rough risk checks, not predictions. The backtest found the forecaster's drawdown "
-               "probabilities too high at the high end, and spreading a buy over a few weeks mainly smooths the "
-               "entry price; it doesn't improve expected returns. Not financial advice.")
+    st.caption("Rough risk checks, not predictions: the forecaster's drawdown probabilities run high, and "
+               "splitting a buy mainly smooths the entry price. Not financial advice.")
+
+
+def tab_reports() -> None:
+    header("Reports")
+    reps = ad.list_reports(Path(os.environ.get("FORECASTER_REPORTS_DIR") or PROJECT_ROOT / "reports"))
+    if not reps:
+        st.info("No weekly reports yet. The first one is written on Sunday evening after the forecast rebuild.",
+                icon="ℹ️")
+        return
+    pick = st.selectbox("Report", range(len(reps)), key="report_pick",
+                        format_func=lambda i: f"Week ending {reps[i]['date'] - pd.Timedelta(days=2):%b %d, %Y}"
+                        + ("  (latest)" if i == 0 else ""))
+    r = reps[pick]
+    if r["pdf"] is not None:
+        st.download_button("Download PDF", r["pdf"].read_bytes(), file_name=r["pdf"].name,
+                           mime="application/pdf", width="stretch", key="report_pdf")
+    with st.container(border=True, key="report"):
+        st.markdown(r["md"].read_text())
 
 
 # --------------------------------------------------------------------------- #
+# Navigation (bottom tab bar, synced with ?tab=)
+# --------------------------------------------------------------------------- #
 
-backtest_banner(ticker)
-{"Forecast": page_forecast, "Portfolio": page_portfolio, "Contribution planner": page_planner,
- "Macro & events": page_macro, "Sentiment & news": page_sentiment}[page](ticker)
+keys = list(TABS)
+if "tab" not in st.session_state:
+    qp = st.query_params.get("tab")
+    st.session_state["tab"] = qp if qp in TABS else "week"
+with st.container(key="bottomnav"):
+    tab = st.radio("Navigation", keys, key="tab", horizontal=True, label_visibility="collapsed",
+                   format_func=lambda k: TABS[k].replace("This Week", "Week").replace("Gold VWAP", "Gold"))
+if st.query_params.get("tab") != tab:
+    st.query_params["tab"] = tab
+
+{"week": tab_week, "calendar": tab_calendar, "gold": tab_gold, "portfolio": tab_portfolio,
+ "reports": tab_reports}[tab]()
+if tab not in ("portfolio",):
+    settings_footer()

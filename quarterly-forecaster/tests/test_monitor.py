@@ -9,6 +9,7 @@ import pytest
 
 from forecaster.config import load_settings
 from forecaster.monitor import (
+    build_quotes,
     Alert, Monitor, MonitorConfig, MonitorState, TelegramBot, check_events, check_gold_vwap, check_regimes,
     check_shocks, check_vix_spike, due, market_open, session_vwap, setup_logging, status_text,
 )
@@ -37,12 +38,14 @@ def test_market_hours():
     assert not market_open(ny("2026-11-08 12:00"))                     # Sunday
 
 
-def test_due_15min_in_market_hourly_otherwise():
+def test_due_every_15min_around_the_clock():
     t = ny("2026-11-09 10:00")
     assert due(t, None)
     assert not due(t, t - pd.Timedelta(minutes=10)) and due(t, t - pd.Timedelta(minutes=15))
-    night = ny("2026-11-09 22:00")
-    assert not due(night, night - pd.Timedelta(minutes=45)) and due(night, night - pd.Timedelta(minutes=60))
+    night = ny("2026-11-08 22:00")                                    # Sunday night: still 15 min
+    assert not due(night, night - pd.Timedelta(minutes=10)) and due(night, night - pd.Timedelta(minutes=15))
+    hourly = MonitorConfig(off_hours_every_min=60)                    # still configurable
+    assert not due(night, night - pd.Timedelta(minutes=45), hourly) and due(night, night - pd.Timedelta(minutes=60), hourly)
 
 
 # --------------------------------------------------------------------------- #
@@ -177,6 +180,41 @@ def test_failed_send_is_retried(tmp_path):
     now[0] += pd.Timedelta(minutes=15)
     m.run_checks()
     assert m.state.was_sent("event:2026-11-10:CPI:24h")
+
+
+def test_tick_writes_prices_snapshot_and_health(tmp_path):
+    from forecaster import status as health
+    now = [ny("2026-11-09 10:00")]
+    vix = pd.DataFrame({"Close": [17.6]}, index=[now[0]])
+    cad = pd.DataFrame({"Close": [1.40]}, index=[now[0]])
+    sent = []
+    m = _monitor(tmp_path, now, sent, intraday=lambda s: {"^VIX": vix, "CAD=X": cad, "GC=F": gold_bars()}.get(s))
+    m.run_checks()
+    p = json.loads((tmp_path / "data" / "snapshots" / "prices.json").read_text())
+    assert p["usd_cad"] == 1.40
+    assert p["quotes"]["^VIX"]["price"] == 17.6 and p["quotes"]["^VIX"]["change"] == pytest.approx(17.6 / 16 - 1)
+    assert p["quotes"]["^VIX"]["price_cad"] is None                          # points, never converted
+    g = p["quotes"]["GC=F"]
+    assert g["price_cad"] == pytest.approx(g["price"] * 1.40) and "z" in g and "vwap" in g
+    probs = {x.source: x.message for x in health.problems(tmp_path / "data", now[0], ("prices",))}
+    assert "no data for SPY, QQQ" in probs["prices"]         # no data for them -> failure recorded
+    m.intraday = lambda s: {"^VIX": vix, "CAD=X": cad, "GC=F": gold_bars()}.get(s, gold_bars())
+    now[0] += pd.Timedelta(minutes=15)
+    m.run_checks()
+    assert health.problems(tmp_path / "data", now[0], ("prices",)) == []
+
+
+def test_build_quotes_cad_and_change():
+    now = ny("2026-11-09 10:00")
+    bars = pd.DataFrame({"Close": [100.0, 101.0]}, index=[now - pd.Timedelta(minutes=5), now])
+    daily = pd.Series([95.0, 99.0, 100.5], index=pd.to_datetime(["2026-11-05", "2026-11-06", "2026-11-09"]))
+    q = build_quotes({"SPY": bars, "CAD=X": pd.DataFrame({"Close": [1.38]}, index=[now])}, {"SPY": daily}, now)
+    s = q["quotes"]["SPY"]
+    assert s["prev_close"] == 99.0                      # today's partial daily bar is not "previous"
+    assert s["change"] == pytest.approx(101 / 99 - 1) and s["price_cad"] == pytest.approx(101 * 1.38)
+    assert "no intraday data for QQQ" in q["errors"]
+    no_fx = build_quotes({"SPY": bars}, {}, now)["quotes"]["SPY"]
+    assert no_fx["price_cad"] is None and no_fx["change"] is None
 
 
 # --------------------------------------------------------------------------- #

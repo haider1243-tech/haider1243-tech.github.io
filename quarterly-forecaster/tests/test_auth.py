@@ -50,20 +50,19 @@ def test_app_fails_closed_without_hash(tmp_path, monkeypatch):
     at = _app(tmp_path, monkeypatch).run()
     assert not at.exception
     assert at.error and "APP_PASSWORD_HASH" in at.error[0].value
-    assert not at.sidebar.radio and not at.metric                  # nothing else rendered
+    assert not at.radio and not at.metric                          # nothing else rendered
 
 
 def test_login_flow(tmp_path, monkeypatch):
     at = _app(tmp_path, monkeypatch).run()
-    assert not at.sidebar.radio and at.text_input(key="login_pw")  # only the login form
+    assert not at.radio and at.text_input(key="login_pw")  # only the login form
     # form widgets: type and submit in the same run (as a browser does)
     at.text_input(key="login_pw").input("wrong")
     at.button[0].click().run()
-    assert at.error and "Wrong password" in at.error[0].value and not at.sidebar.radio
+    assert at.error and "Wrong password" in at.error[0].value and not at.radio
     at.text_input(key="login_pw").input(TEST_PASSWORD)
     at.button[0].click().run()
-    assert not at.exception and at.sidebar.radio                   # dashboard unlocked
-    assert any("Backtest" in m.value for m in at.markdown) or at.info
+    assert not at.exception and at.radio(key="tab")                  # dashboard unlocked
 
 
 def test_session_lockout_after_five_failures(tmp_path, monkeypatch):
@@ -75,4 +74,4 @@ def test_session_lockout_after_five_failures(tmp_path, monkeypatch):
     at.text_input(key="login_pw").input(TEST_PASSWORD)
     at.button[0].click().run()
     assert at.error and "Too many failed attempts" in at.error[0].value
-    assert not at.sidebar.radio                                    # even the right password is refused
+    assert not at.radio                                    # even the right password is refused

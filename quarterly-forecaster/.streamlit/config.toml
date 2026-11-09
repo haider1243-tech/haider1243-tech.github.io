@@ -1,7 +1,17 @@
+[server]
+# serves ./static at /app/static/ (PWA manifest + icons). Nothing private lives there.
+enableStaticServing = true
+
 [theme]
-# Accent = categorical slot 1 (blue). Streamlit's default red reads as an
-# alarm on neutral controls (buttons, progress bars, toggles).
-primaryColor = "#2a78d6"
+# Dark, mobile-first. Accent = categorical slot 1 (dark-mode blue), so red keeps its meaning.
+base = "dark"
+primaryColor = "#3987e5"
+backgroundColor = "#0d0d0d"
+secondaryBackgroundColor = "#1a1a19"
+textColor = "#f0efec"
+
+[client]
+toolbarMode = "minimal"
 
 [browser]
 gatherUsageStats = false

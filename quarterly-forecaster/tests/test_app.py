@@ -1,126 +1,187 @@
-"""Run app.py headless with Streamlit's AppTest against fixture snapshots."""
+"""Drive the mobile app (app.py) headless with Streamlit's AppTest against fixture data."""
+import json
 from pathlib import Path
 
+import pandas as pd
 import pytest
 
-from conftest import authed_app
-from streamlit.testing.v1 import AppTest
-
 from app_fixtures import write_fixture_snapshots
-from forecaster import pipeline
+from conftest import authed_app
+from forecaster import pipeline, status
+from forecaster.pipeline import write_json
+from forecaster.webhook_server import AlertStore
 
 APP = str(Path(__file__).resolve().parents[1] / "app.py")
+NOW = pd.Timestamp.now(tz="UTC")
+
+
+def _prices():
+    return {"generated_at": NOW.isoformat(), "usd_cad": 1.38, "errors": [], "quotes": {
+        "SPY": {"label": "SPY", "price": 600.0, "price_cad": 828.0, "change": 0.004, "as_of": NOW.isoformat()},
+        "QQQ": {"label": "QQQ", "price": 520.0, "price_cad": 717.6, "change": -0.01, "as_of": NOW.isoformat()},
+        "GC=F": {"label": "Gold", "price": 2700.0, "price_cad": 3726.0, "change": 0.002, "vwap": 2690.0,
+                 "sd": 4.0, "z": 2.5, "as_of": NOW.isoformat()},
+        "^VIX": {"label": "VIX", "price": 17.2, "price_cad": None, "change": 0.05, "as_of": NOW.isoformat()},
+    }}
+
+
+def _alerts(db: Path):
+    store = AlertStore(db)
+    for i, (verdict, ret) in enumerate([("TAKE", 0.004), ("TAKE", -0.002), ("SKIP", -0.003)]):
+        t = (NOW - pd.Timedelta(hours=30 - i)).isoformat()
+        rid, _ = store.insert({"received_at": t, "alert_time": t, "time_from_tv": 1, "ticker": "XAUUSD",
+                               "forecaster_ticker": "GC=F", "price_symbol": "GC=F", "price": 2650.0 + i,
+                               "strategy": "vwap_gold", "side": "long", "payload": "{}", "dedupe_key": f"k{i}",
+                               "verdict": verdict, "reasons": json.dumps([f"reason {i}"]), "checks": "[]"})
+        store.update_outcome(rid, "1h", status="done", ret=ret, signed_ret=ret)
 
 
 @pytest.fixture(scope="module")
-def cache_dir(tmp_path_factory):
+def data(tmp_path_factory):
     d = tmp_path_factory.mktemp("cache")
-    write_fixture_snapshots(d / "snapshots", ticker="SYN")
-    return d
+    snaps = d / "snapshots"
+    for t in ("SPY", "QQQ", "GC=F"):
+        write_fixture_snapshots(snaps, ticker=t)
+        s = pipeline.read_json(snaps / f"ticker_{t}.json")
+        write_json(snaps / f"ticker_{pipeline.safe_name(t)}.json", s)
+    write_json(snaps / "prices.json", _prices())
+    _alerts(d / "alerts.sqlite")
+    for src in ("prices", "market", "forecasts", "news"):
+        status.record(d, src, True)
+    reports = tmp_path_factory.mktemp("reports")
+    (reports / "weekly_2026-11-01.md").write_text("# Weekly report 2026-11-01\n\nOlder report body")
+    (reports / "weekly_2026-11-08.md").write_text("# Weekly report 2026-11-08\n\nNewest report body")
+    (reports / "weekly_2026-11-08.pdf").write_bytes(b"%PDF-1.4 fake")
+    return d, reports
 
 
 @pytest.fixture
-def app(cache_dir, monkeypatch):
-    monkeypatch.setenv("FORECASTER_CACHE_DIR", str(cache_dir))
+def app(data, monkeypatch):
+    d, reports = data
+    monkeypatch.setenv("FORECASTER_CACHE_DIR", str(d))
+    monkeypatch.setenv("FORECASTER_REPORTS_DIR", str(reports))
+    monkeypatch.delenv("FINNHUB_API_KEY", raising=False)
     at = authed_app(APP, default_timeout=60)
     at.run()
     assert not at.exception, at.exception
     return at
 
 
+def _html(at) -> str:
+    return "\n".join(str(getattr(e, "proto", e).body) for e in at.get("html"))
+
+
 def _text(at) -> str:
-    parts = [m.value for m in at.markdown] + [c.value for c in at.caption] + [s.value for s in at.subheader]
+    parts = [m.value for m in at.markdown] + [c.value for c in at.caption]
     parts += [x.value for x in at.warning] + [x.value for x in at.info] + [x.value for x in at.success]
-    parts += [x.value for x in at.error] + [m.label for m in at.metric]
-    return "\n".join(map(str, parts))
+    parts += [x.value for x in at.error]
+    return "\n".join(map(str, parts)) + "\n" + _html(at)
 
 
-def _select(at, ticker="SYN"):
-    at.sidebar.selectbox(key="ticker").set_value(ticker).run()
+def _go(at, tab):
+    at.radio(key="tab").set_value(tab).run()
     assert not at.exception, at.exception
     return at
 
 
-def test_banner_on_every_page(app):
-    at = _select(app)
-    for page in ("Forecast", "Macro & events", "Sentiment & news"):
-        at.sidebar.radio(key="page").set_value(page).run()
-        assert not at.exception, at.exception
+def test_bottom_tabs_and_last_updated_on_every_tab(app):
+    assert app.radio(key="tab").options == ["Week", "Calendar", "Gold", "Portfolio", "Reports"]
+    for tab, title in (("week", "This Week"), ("calendar", "Calendar"), ("gold", "Gold VWAP"),
+                       ("portfolio", "Portfolio"), ("reports", "Reports")):
+        at = _go(app, tab)
         txt = _text(at)
-        assert "Backtest accuracy" in txt, page
-        assert "Outcomes inside P10–P90" in txt
-        assert "Not reliably better than a naive historical-average baseline" in txt  # reference verdict
-        assert "reference S&P 500 run" in txt
+        assert f"### {title}" in txt, tab
+        assert "Last updated · prices just now · forecasts just now" in txt, tab
+        assert "Data problem" not in txt, tab                      # all sources fresh -> no red banner
+        assert at.query_params["tab"] == [tab] or at.query_params["tab"] == tab
 
 
-def test_forecast_page(app):
-    at = _select(app)
+def test_pwa_head_and_manifest_link(app):
+    h = _html(app)
+    assert "/app/static/manifest.json" in h and "apple-touch-icon" in h and "theme-color" in h
+
+
+def test_this_week(app):
+    txt = _text(app)
+    assert "Market regime (SPY)" in txt and "VIX" in txt and "17.2" in txt
+    assert "middle case" in txt and "likely range" in txt      # 3-line outlook gives ranges
+    assert "C$828.00" in txt                                   # quotes in CAD
+    charts = [c for c in app.get("plotly_chart")]
+    assert len(charts) == 3                                    # SPY, QQQ, gold fans
+    assert "Model check" in txt and "within noise" in txt      # honest backtest note
+
+
+def test_calendar(app):
+    at = _go(app, "calendar")
     txt = _text(at)
-    assert "SYN: 4-quarter forecast range" in txt
-    assert "Ranges, not predictions" in txt
-    assert "C$" in txt and "(CAD)" in txt and "Priced in CAD" in txt     # every price shown in CAD
-    assert len(at.dataframe) >= 1
-    tbl = at.dataframe[0].value
-    assert list(tbl["Quarter"]) == ["2021Q3", "2021Q4", "2022Q1", "2022Q2"]
-    assert (tbl["P10 (CAD)"] < tbl["P50 (CAD)"]).all() and (tbl["P50 (CAD)"] < tbl["P90 (CAD)"]).all()
-    assert "Price data ends" in txt      # fixture as-of is 2021 -> staleness warning
-    # SHAP selectors work
-    at.selectbox(key="shap_level").set_value(0.1).run()
-    at.selectbox(key="shap_q").set_value("2022Q2").run()
-    assert not at.exception
+    assert "CPI release" in txt and "PPI release" in txt
+    assert "in 9d" in txt or "in 10d" in txt                   # countdown
+    assert "#d03b3b" in txt and "High" in txt and "Medium" in txt   # impact colours + labels
+    assert "AAPL earnings" not in txt                          # 20 days out: beyond 14
 
 
-def test_macro_page(app):
-    at = _select(app)
-    at.sidebar.radio(key="page").set_value("Macro & events").run()
-    assert not at.exception, at.exception
-    labels = [m.label for m in at.metric]
-    assert {"CPI, YoY", "PPI, YoY", "Fed funds rate"} <= set(labels)
-    events = at.dataframe[0].value
-    assert set(events["Impact"]) == {"High"}
-    at.toggle(key="high_only").set_value(False).run()
-    assert {"High", "Medium"} <= set(at.dataframe[0].value["Impact"])
-
-
-def test_sentiment_page(app):
-    at = _select(app)
-    at.sidebar.radio(key="page").set_value("Sentiment & news").run()
-    assert not at.exception, at.exception
+def test_gold_journal(app):
+    at = _go(app, "gold")
     txt = _text(at)
-    assert "News sentiment (FinBERT)" in txt and "Top headlines" in txt
-    assert "Recent shocks" in txt
-    for order in ("Most negative", "Most positive", "Most recent"):
-        at.radio(key="h_sort").set_value(order).run()
-        assert not at.exception
-    h = at.dataframe[-1].value
-    assert len(h) == 15
+    assert "vs session VWAP" in txt and "+2.5 st. dev." in txt
+    assert "3 total" in txt and "TAKE" in txt and "SKIP" in txt and "reason 2" in txt
+    stats = at.dataframe[0].value
+    take = stats[stats["Verdict"] == "TAKE · 1h"].iloc[0]
+    assert take["n"] == 2 and take["Win rate"] == pytest.approx(50)
 
 
-def test_missing_snapshots_degrade_gracefully(tmp_path, monkeypatch):
+def test_reports_newest_first(app):
+    at = _go(app, "reports")
+    assert "(latest)" in at.selectbox(key="report_pick").format_func(0)
+    assert any("Newest report body" in m.value for m in at.markdown)
+    assert at.get("download_button")
+    at.selectbox(key="report_pick").set_value(1).run()
+    assert any("Older report body" in m.value for m in at.markdown)
+
+
+def test_red_banner_on_failure_and_stale(data, monkeypatch, tmp_path):
+    d = tmp_path / "c"
+    status.record(d, "prices", False, "Yahoo timed out")
+    status.record(d, "market", True, now=NOW - pd.Timedelta(hours=30))
+    monkeypatch.setenv("FORECASTER_CACHE_DIR", str(d))
+    monkeypatch.setenv("FORECASTER_REPORTS_DIR", str(tmp_path / "none"))
+    at = authed_app(APP).run()
+    assert not at.exception, at.exception
+    for tab in ("week", "calendar", "gold", "portfolio", "reports"):
+        txt = _text(_go(at, tab))
+        assert "role=\"alert\"" in txt and "Data problem" in txt
+        assert "Prices: refresh failed (Yahoo timed out)" in txt
+        assert "Macro &amp; events: data is 30 h old" in txt
+        assert "Forecasts: no data yet" in txt
+
+
+def test_empty_cache_degrades_gracefully(tmp_path, monkeypatch):
     monkeypatch.setenv("FORECASTER_CACHE_DIR", str(tmp_path))
-    at = authed_app(APP, default_timeout=60).run()
-    assert not at.exception, at.exception
-    for page in ("Forecast", "Macro & events", "Sentiment & news"):
-        at.sidebar.radio(key="page").set_value(page).run()
-        assert not at.exception, at.exception
-        assert any("Refresh data" in i.value for i in at.info), page
+    monkeypatch.setenv("FORECASTER_REPORTS_DIR", str(tmp_path / "reports"))
+    at = authed_app(APP).run()
+    for tab in ("week", "calendar", "gold", "portfolio", "reports"):
+        _go(at, tab)
+        assert "Last updated · prices never" in _text(at)
 
 
-def test_refresh_button_calls_pipeline(app, monkeypatch, cache_dir):
+def test_query_param_opens_tab(data, monkeypatch):
+    d, reports = data
+    monkeypatch.setenv("FORECASTER_CACHE_DIR", str(d))
+    at = authed_app(APP)
+    at.query_params["tab"] = "gold"
+    at.run()
+    assert at.radio(key="tab").value == "gold"
+
+
+def test_refresh_button_calls_pipeline(app, monkeypatch):
     calls = []
 
-    def fake_refresh_all(settings, tickers, warn, backtest_stale_days=None, **kw):
-        calls.append((tuple(tickers), backtest_stale_days))
+    def fake_refresh_all(settings, tickers=None, warn=print, **kw):
+        calls.append(kw)
         warn("fake refresh ran")
-        return {"market": "ok", **{t: "ok" for t in tickers}}
+        return {"market": "ok"}
 
     monkeypatch.setattr(pipeline, "refresh_all", fake_refresh_all)
-    at = _select(app)
-    at.sidebar.button[0].click().run()
-    assert not at.exception, at.exception
-    assert calls == [(("SYN",), None)]
-    assert "fake refresh ran" in at.session_state["refresh_log"]
-    at.sidebar.checkbox(key="with_bt").check().run()
-    at.sidebar.radio(key="scope").set_value("All tickers + market").run()
-    at.sidebar.button[0].click().run()
-    assert calls[-1][1] == 0 and "SYN" in calls[-1][0] and "SPY" in calls[-1][0]
+    app.button(key="refresh").click().run()
+    assert not app.exception, app.exception
+    assert calls == [{"forecasts": False}]

@@ -2,12 +2,12 @@
 
     python -m forecaster.monitor          # what the `monitor` Docker service runs
 
-Schedule (APScheduler, times in New York):
-  * tick every 15 min; it does work every 15 min during US market hours
-    (Mon-Fri 09:30-16:00 ET) and hourly otherwise.
-  * daily data refresh Mon-Fri 06:15 (pipeline: prices, macro, events, news,
-    forecasts, portfolio); Saturday 06:15 also re-runs backtests older than 28 days.
-  * weekly report Sunday 07:23.
+Schedule (APScheduler):
+  * every 15 min, around the clock: intraday prices (SPY, QQQ, gold, VIX, USD/CAD ->
+    data/snapshots/prices.json), news, and the alert checks below.
+  * 06:15 and 18:15 New York, every day: macro, events, news snapshot, portfolio valuation.
+  * Sunday 18:00 Mountain Time: full forecast rebuild (+ backtests older than 28 days),
+    then the weekly report.
   * Telegram long-polling for /status and /help (only your TELEGRAM_CHAT_ID).
 
 Checks on each tick (alert text always says why):
@@ -44,6 +44,7 @@ import pandas as pd
 log = logging.getLogger("forecaster.monitor")
 
 NY = "America/New_York"
+MT = "America/Edmonton"            # Mountain Time (the weekly rebuild runs Sunday 18:00 here)
 MONITORED: dict[str, str] = {"SPY": "S&P 500 (SPY)", "QQQ": "Nasdaq 100 (QQQ)", "GC=F": "Gold",
                              "^VIX": "VIX", "DX-Y.NYB": "Dollar index (DXY)", "^TNX": "US 10Y yield"}
 EVENT_CATEGORIES = ("CPI", "PPI", "FOMC", "Jobs")
@@ -56,7 +57,7 @@ class MonitorConfig:
     gold_sigma: float = 2.0
     gold_min_bars: int = 12            # 1 hour of 5-minute bars before the bands mean anything
     market_every_min: int = 15
-    off_hours_every_min: int = 60
+    off_hours_every_min: int = 15      # the app wants prices + news every 15 min around the clock
     shock_days: int = 1                # today and yesterday
 
 
@@ -242,6 +243,50 @@ def check_shocks(shocks: list[dict], now: pd.Timestamp, cfg: MonitorConfig = Mon
 
 
 # --------------------------------------------------------------------------- #
+# Quotes snapshot (what the app shows between weekly forecast rebuilds)
+# --------------------------------------------------------------------------- #
+
+QUOTE_SYMBOLS: dict[str, str] = {"SPY": "S&P 500 (SPY)", "QQQ": "Nasdaq 100 (QQQ)", "GC=F": "Gold",
+                                 "^VIX": "VIX", "CAD=X": "USD/CAD"}
+
+
+def build_quotes(intraday: dict[str, pd.DataFrame], daily: dict[str, pd.Series | None],
+                 now: pd.Timestamp, cfg: MonitorConfig = MonitorConfig()) -> dict:
+    """Latest price per symbol, change vs the previous daily close, CAD value, gold vs VWAP."""
+    from forecaster.market_data import ticker_currency
+
+    fx = None
+    cad_bars = intraday.get("CAD=X")
+    if cad_bars is not None and not cad_bars.empty:
+        fx = float(cad_bars["Close"].dropna().iloc[-1])
+    out: dict = {"generated_at": now.isoformat(), "usd_cad": fx, "quotes": {}, "errors": []}
+    for sym, label in QUOTE_SYMBOLS.items():
+        bars = intraday.get(sym)
+        if bars is None or bars.empty or bars["Close"].dropna().empty:
+            out["errors"].append(f"no intraday data for {sym}")
+            continue
+        last_t = pd.Timestamp(bars.index[-1])
+        last_t = last_t.tz_localize("UTC") if last_t.tz is None else last_t.tz_convert("UTC")
+        price = float(bars["Close"].dropna().iloc[-1])
+        d = daily.get(sym)
+        prev = None
+        if d is not None and not d.dropna().empty:
+            today = last_t.tz_convert(NY).tz_localize(None).normalize()
+            before = d.dropna()[d.dropna().index < today]
+            prev = float(before.iloc[-1]) if len(before) else None
+        cur = ticker_currency(sym)
+        q = {"label": label, "price": price, "as_of": last_t.isoformat(), "prev_close": prev,
+             "change": (price / prev - 1) if prev else None, "unit": cur or "points",
+             "price_cad": price * fx if cur == "USD" and fx else (price if cur == "CAD" else None)}
+        if sym == "GC=F":
+            v = session_vwap(bars).iloc[-1]
+            if v["sd"] > 0 and v["bars_in_session"] >= cfg.gold_min_bars:
+                q.update(vwap=float(v["vwap"]), sd=float(v["sd"]), z=float((price - v["vwap"]) / v["sd"]))
+        out["quotes"][sym] = q
+    return out
+
+
+# --------------------------------------------------------------------------- #
 # /status
 # --------------------------------------------------------------------------- #
 
@@ -409,40 +454,58 @@ class Monitor:
         return n
 
     def run_checks(self, force: bool = False) -> int:
+        from forecaster import status as st
+        from forecaster.pipeline import write_json
+
         with self._lock:
             now = self.clock()
             last = self.state.get("last_run")
             if not force and not due(now, pd.Timestamp(last) if last else None, self.cfg):
                 return 0
             self.state.set("last_run", now.isoformat())
+            cache = Path(self.settings.cache_dir)
             alerts: list[Alert] = []
             for t in MONITORED:                               # daily cache: downloads only when stale
                 try:
                     self.store.get(t)
                 except Exception as exc:
                     log.warning("refresh %s failed: %s", t, exc)
+            bars: dict[str, pd.DataFrame] = {}
+            for sym in QUOTE_SYMBOLS:                         # one intraday fetch per symbol per tick
+                try:
+                    b = self.intraday(sym)
+                    if b is not None and not b.empty:
+                        bars[sym] = b
+                except Exception as exc:
+                    log.warning("intraday %s failed: %s", sym, exc)
+            daily = {}
+            for sym in QUOTE_SYMBOLS:
+                df = self.store.read(sym)
+                daily[sym] = None if df is None else df["Close"]
+            quotes = build_quotes(bars, daily, now, self.cfg)
+            if quotes["quotes"]:
+                self.snap_dir.mkdir(parents=True, exist_ok=True)
+                write_json(self.snap_dir / "prices.json", quotes)
+            missing = [e.rsplit(" ", 1)[-1] for e in quotes["errors"] if "CAD=X" not in e]
+            st.record(cache, "prices", not missing, f"no data for {', '.join(missing)}" if missing else None)
+
             market = self._json("market.json")
             alerts += check_events((market or {}).get("events", []), now)
-            try:
-                vb = self.intraday("^VIX")
-                if vb is not None and not vb.empty:
-                    t_last = pd.Timestamp(vb.index[-1])
-                    t_last = t_last.tz_localize("UTC") if t_last.tz is None else t_last.tz_convert("UTC")
-                    v_last = float(vb["Close"].dropna().iloc[-1])
-                    self.state.set("vix_latest", f"{v_last}|{t_last.isoformat()}")
-                    daily = self.store.read("^VIX")
-                    alerts += check_vix_spike(None if daily is None else daily["Close"], v_last, t_last, self.cfg)
-            except Exception as exc:
-                log.warning("VIX intraday failed: %s", exc)
-            try:
-                alerts += check_gold_vwap(self.intraday("GC=F"), self.cfg)
-            except Exception as exc:
-                log.warning("gold intraday failed: %s", exc)
+            vb = bars.get("^VIX")
+            if vb is not None:
+                vq = quotes["quotes"].get("^VIX")
+                if vq:
+                    t_last = pd.Timestamp(vq["as_of"])
+                    self.state.set("vix_latest", f"{vq['price']}|{t_last.isoformat()}")
+                    alerts += check_vix_spike(daily.get("^VIX"), vq["price"], t_last, self.cfg)
+            alerts += check_gold_vwap(bars.get("GC=F"), self.cfg)
             alerts += check_regimes(self.snapshots(), self.state)
-            if self.refresh_news and (not market_open(now) or now.minute < 15):   # news hourly
+            if self.refresh_news:
                 try:
                     self.refresh_news()
+                    st.record(cache, "news", True)
                 except Exception as exc:
+                    st.record(cache, "news", False, str(exc))
                     log.warning("news refresh failed: %s", exc)
             alerts += check_shocks(self.current_shocks(market), now, self.cfg)
             sent = self.deliver(alerts)
@@ -536,14 +599,17 @@ def main(argv: list[str] | None = None) -> int:  # pragma: no cover - long-runni
         print(f"sent {mon.run_checks(force=True)} alerts")
         return 0
 
-    def daily_refresh(backtests: bool = False) -> None:
+    def market_refresh() -> None:
+        """Macro, events, news snapshot and portfolio valuation (no forecast rebuild)."""
         from forecaster.pipeline import refresh_all
-        log.info("daily refresh start")
-        status = refresh_all(settings, warn=lambda m: log.warning(m), backtest_stale_days=28 if backtests else None)
-        log.info("daily refresh done: %s", status)
+        log.info("market refresh: %s", refresh_all(settings, warn=lambda m: log.warning(m), forecasts=False))
 
-    def weekly_report() -> None:
+    def weekly_rebuild() -> None:
+        """Full forecast rebuild, stale backtests, then the weekly report."""
         from forecaster import weekly_report as wr
+        from forecaster.pipeline import refresh_all
+        log.info("weekly rebuild start")
+        log.info("weekly rebuild: %s", refresh_all(settings, warn=lambda m: log.warning(m), backtest_stale_days=28))
         wr.main(["--no-refresh"])
 
     def safe(fn, *a):
@@ -555,12 +621,14 @@ def main(argv: list[str] | None = None) -> int:  # pragma: no cover - long-runni
         return run
 
     sched = BackgroundScheduler(timezone=NY, job_defaults={"coalesce": True, "max_instances": 1,
-                                                          "misfire_grace_time": 900})
+                                                          "misfire_grace_time": 3600})
+    # prices, news and alert checks: every 15 min, around the clock
     sched.add_job(safe(mon.run_checks), "interval", minutes=15, next_run_time=pd.Timestamp.now(tz=NY).to_pydatetime(),
                   id="checks")
-    sched.add_job(safe(daily_refresh), CronTrigger(day_of_week="mon-fri", hour=6, minute=15, timezone=NY), id="refresh")
-    sched.add_job(safe(daily_refresh, True), CronTrigger(day_of_week="sat", hour=6, minute=15, timezone=NY), id="refresh_sat")
-    sched.add_job(safe(weekly_report), CronTrigger(day_of_week="sun", hour=7, minute=23, timezone=NY), id="report")
+    # macro/events/portfolio twice a day, every day (keeps them under the app's 24 h staleness limit)
+    sched.add_job(safe(market_refresh), CronTrigger(hour="6,18", minute=15, timezone=NY), id="market")
+    # full forecast rebuild + weekly report: Sunday 6 pm Mountain Time
+    sched.add_job(safe(weekly_rebuild), CronTrigger(day_of_week="sun", hour=18, minute=0, timezone=MT), id="weekly")
     sched.start()
     log.info("monitor started (telegram %s)", "on" if bot.configured else "off")
     try:

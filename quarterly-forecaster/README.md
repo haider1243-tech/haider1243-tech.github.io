@@ -9,6 +9,42 @@ See [CLAUDE.md](CLAUDE.md) for goals, design rules and every command.
 > See [results/backtest_sp500_2005_2022.md](results/backtest_sp500_2005_2022.md).
 > The dashboard shows this on every page.
 
+## Use it as a phone app (no code)
+
+**Windows, one time:** install [Python 3.11+](https://www.python.org/downloads/) (tick *Add python.exe
+to PATH*), then double-click **`setup.bat`**. It installs everything, asks for a dashboard password,
+creates `.env` and `portfolio.yaml` for you to fill in, puts a **Quarterly Forecaster** shortcut on
+the desktop, and sets auto-start (when you sign in, or at PC boot). If Tailscale is installed it also
+shares the dashboard privately to your phone.
+
+**Every day:** double-click the desktop shortcut (or `start.bat`). It starts the monitor, the
+TradingView webhook and the dashboard together in the background (plus the Cloudflare tunnel if
+`cloudflared/config.yml` exists) and opens the app. Crashed services restart by themselves. `stop.bat`
+stops everything. Logs are in `logs/`. On Linux/macOS use `./start.sh` instead.
+
+**On your phone:** with Tailscale connected, open `https://<pc-name>.<tailnet>.ts.net`, log in, then
+*Share → Add to Home Screen* (iPhone Safari) or *⋮ → Install app / Add to Home screen* (Android Chrome).
+It opens full-screen like an app. The link only works on your own Tailscale devices, and the app
+still asks for the password; nothing is public.
+
+Bottom tabs:
+- **This Week**: market regime, VIX, a 3-line plain-English outlook, and SPY / QQQ / gold
+  4-quarter P10–P50–P90 fan charts (CAD).
+- **Calendar**: the next 14 days of CPI, PPI, FOMC, jobs, GDP and earnings, colour- and label-coded
+  by impact, with live countdowns.
+- **Gold VWAP**: gold vs its session VWAP, the latest TradingView alerts with TAKE / CAUTION / SKIP
+  and reasons, and the journal's win rate per verdict and horizon.
+- **Portfolio**: holdings in CAD, P&L, allocation, the portfolio forecast range, and the
+  contribution planner.
+- **Reports**: every Sunday report, newest first, readable in the app (PDF download too).
+
+Every page shows **Last updated** times, and a **red banner** when a data source's last refresh
+failed or its data is older than 24 h (8 days for the weekly forecasts).
+
+Automatic refresh (the monitor does it; nothing to click): prices and news every 15 minutes, macro and
+events at 06:15 and 18:15 New York time, and a full forecast rebuild plus the weekly report every
+**Sunday at 6 pm Mountain time**.
+
 ## Currency: everything in CAD
 
 Money values are reported in CAD. Canadian tickers (`XIU.TO`, `XEQT.TO`, `VFV.TO`, `ZAG.TO`
@@ -26,8 +62,8 @@ from your phone via Tailscale), the TradingView webhook (only `/tv-alert`, throu
 Tunnel), the 24/7 monitor (Telegram alerts and `/status`), and cloudflared. Step-by-step setup,
 including Tailscale and Cloudflare Tunnel, is in **[DEPLOY.md](DEPLOY.md)**.
 
-The monitor checks every 15 minutes in market hours and hourly otherwise. Each alert is sent once,
-with a short reason:
+The monitor checks every 15 minutes, around the clock (gold trades nearly 24 h). Each alert is sent
+once, with a short reason:
 - warnings 24 h and 1 h before CPI, PPI, jobs and FOMC
 - VIX spikes of 20% or more
 - gold beyond 2 standard deviations from its session VWAP
@@ -50,16 +86,11 @@ Optional, for news sentiment (FinBERT, ~1–2 GB):
 
 ```bash
 python -m forecaster.pipeline          # build snapshots (forecasts, macro, events, news)
-streamlit run app.py
+streamlit run app.py                   # or: python -m forecaster.launcher --open
 ```
 
-The app only reads snapshots in `data/snapshots/`; the **Refresh data** button in
-the sidebar rebuilds them (selected ticker or all; optionally the backtest too).
-Pages: Forecast (fan chart, regime, SHAP drivers), Macro & events (CPI, PPI, Fed
-funds, next-90-day high-impact events, risk density), Sentiment & news (gauges,
-daily index with shocks, top headlines). Backtest accuracy is shown above each page;
-until a ticker has its own backtest, the committed S&P 500 reference result is shown
-and labelled as such.
+The app only reads snapshots in `data/snapshots/` (plus `data/status.json` for the health banner);
+it never runs models on page load. Layout and tabs: see *Use it as a phone app* above.
 
 ## Portfolio
 

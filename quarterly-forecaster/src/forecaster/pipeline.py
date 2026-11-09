@@ -335,34 +335,55 @@ def refresh_market(settings: Settings, warn: Warn = print, score_news: bool = Tr
     return snap
 
 
+# Shown on the app's "This Week" card: always forecast these, plus core + watchlist.
+APP_TICKERS: tuple[str, ...] = ("SPY", "QQQ", "GC=F")
+
+
+def default_forecast_tickers(settings: Settings) -> list[str]:
+    return list(dict.fromkeys([*settings.tickers, *APP_TICKERS]))
+
+
 def refresh_all(settings: Settings, tickers: list[str] | None = None, warn: Warn = print,
                 market: bool = True, score_news: bool = True,
-                backtest_stale_days: float | None = None) -> dict[str, str]:  # pragma: no cover
-    """Refresh market + every ticker; per-step failures are reported, not raised."""
+                backtest_stale_days: float | None = None, forecasts: bool = True) -> dict[str, str]:  # pragma: no cover
+    """Refresh market + portfolio + (optionally) every ticker's forecast.
+
+    Per-step failures are reported, not raised, and recorded in data/status.json
+    (the app's red banner reads it).
+    """
+    from forecaster import status as st
+
     status: dict[str, str] = {}
     if market:
         try:
             refresh_market(settings, warn, score_news)
             status["market"] = "ok"
+            st.record(settings.cache_dir, "market", True)
         except Exception as exc:
             status["market"] = f"failed: {exc}"
+            st.record(settings.cache_dir, "market", False, str(exc))
             warn(f"market: {exc}")
-    if market:
         from forecaster.portfolio import PORTFOLIO_FILE, refresh_portfolio
 
         if PORTFOLIO_FILE.exists():
             try:
                 refresh_portfolio(settings, warn=warn)
                 status["portfolio"] = "ok"
+                st.record(settings.cache_dir, "portfolio", True)
             except Exception as exc:
                 status["portfolio"] = f"failed: {exc}"
+                st.record(settings.cache_dir, "portfolio", False, str(exc))
                 warn(f"portfolio: {exc}")
-    for t in tickers or list(settings.tickers):
+    if not forecasts:
+        return status
+    failed = []
+    for t in tickers or default_forecast_tickers(settings):
         try:
             refresh_ticker(settings, t, warn)
             status[t] = "ok"
         except Exception as exc:
             status[t] = f"failed: {exc}"
+            failed.append(t)
             warn(f"{t}: {exc}")
             continue
         if backtest_stale_days is not None and backtest_is_stale(settings, t, backtest_stale_days):
@@ -372,6 +393,8 @@ def refresh_all(settings: Settings, tickers: list[str] | None = None, warn: Warn
             except Exception as exc:
                 status[f"{t} backtest"] = f"failed: {exc}"
                 warn(f"{t} backtest: {exc}")
+    st.record(settings.cache_dir, "forecasts", not failed,
+              None if not failed else f"forecast failed for {', '.join(failed)}")
     return status
 
 

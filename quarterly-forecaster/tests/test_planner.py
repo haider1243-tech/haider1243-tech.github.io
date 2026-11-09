@@ -192,19 +192,24 @@ def app_with_portfolio(tmp_path, monkeypatch):
     ]
     snaps = tmp_path / "snapshots"
     snaps.mkdir()
-    write_json(snaps / "portfolio.json", {"holdings": holdings, "planner": {"monthly_amount": 1000.0,
+    for h in holdings:
+        h.update(pnl=0.0, pnl_pct=0.0)
+    alloc = [{"label": "Equity", "value": 10000.0, "weight": 1.0}]
+    write_json(snaps / "portfolio.json", {"holdings": holdings, "total_value": 10000.0, "total_pnl": 0.0,
+               "total_pnl_pct": 0.0, "risk": {}, "flags": [],
+               "allocation": {k: alloc for k in ("asset_class", "sector", "account", "region")},
+               "planner": {"monthly_amount": 1000.0,
                "targets": {"XEQT.TO": 60, "ZAG.TO": 20, "VFV.TO": 20}},
                "forecast": [{"quarter": "2027Q1", "prob_drawdown": 0.12}]})
     monkeypatch.setenv("FORECASTER_CACHE_DIR", str(tmp_path))
     at = authed_app(str(Path(__file__).resolve().parents[1] / "app.py"), default_timeout=60).run()
-    at.sidebar.radio(key="page").set_value("Contribution planner").run()
+    at.radio(key="tab").set_value("portfolio").run()
     assert not at.exception, at.exception
     return at, snaps
 
 
 def test_planner_page(app_with_portfolio):
     at, _ = app_with_portfolio
-    assert "Contribution planner (CAD)" in [s.value for s in at.subheader]
     t = next(d.value for d in at.dataframe if "Buy (CAD)" in d.value.columns)
     buy = dict(zip(t["Ticker"], t["Buy (CAD)"]))
     assert sum(buy.values()) == pytest.approx(1000) and buy["VFV.TO"] == 0
