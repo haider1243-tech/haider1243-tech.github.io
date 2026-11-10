@@ -1,5 +1,6 @@
 import json
 import warnings
+from test_webhook import LIVE_OK
 
 import httpx
 import pandas as pd
@@ -334,7 +335,7 @@ def test_webhook_take_places_order_and_caution_does_not(make, tmp_path):
                                        "sentiment": {"MARKET": [{"date": "2026-11-06"}]}})
     vix = pd.Series([15.0, 15.2], index=pd.to_datetime(["2026-11-05", "2026-11-06"]))
     app = create_app(settings, AlertStore(tmp_path / "data" / "alerts.sqlite"),
-                     Context(settings, vix_loader=lambda: vix), TelegramNotifier(None, None),
+                     Context(settings, vix_loader=lambda: vix, live_loader=lambda now: dict(LIVE_OK)), TelegramNotifier(None, None),
                      clock=lambda: NOW, resolve_every_s=None, executor=ex)
     c = TestClient(app)
     body = {"ticker": "XAUUSD", "price": "2650.20", "strategy": "vwap_gold", "side": "long",

@@ -53,12 +53,13 @@ src/forecaster/
   status.py        # data health (data/status.json): last success/failure per source -> red banner
   appdata.py       # pure helpers for the app tabs (outlook lines, calendar, gold journal, reports)
   project_status.py # Status tab + STATUS.md: module imports + pytest, data/key health, backtests, phase gates
+  live_feed.py     # Finnhub trades websocket + OANDA pricing stream -> ring buffer, 1s/1m bars in data/live.sqlite
   launcher.py      # supervises monitor + webhook + dashboard (+ cloudflared) for start.bat/start.sh
   auth.py          # dashboard password (PBKDF2, ':'-separated hash) + login lockouts
   model.py         # Forecast contract + block-bootstrap baseline model
   cli.py           # `python -m forecaster`
   sources/         # one adapter per data provider
-app.py             # mobile-first Streamlit app, 6 bottom tabs (reads data/snapshots/*.json only)
+app.py             # mobile-first Streamlit app, 7 bottom tabs (reads data/snapshots/*.json only)
 static/            # PWA manifest + icons (served at /app/static/; regenerate: scripts/make_icons.py)
 start.bat, stop.bat, setup.bat, scripts/windows/   # Windows one-click launcher, shortcuts, auto-start
 start.sh           # same launcher on Linux/macOS
@@ -171,6 +172,22 @@ data/              # API response cache — contents never committed
   It never changes LIVE_TRADING. Add new modules to `MODULES` (and `TEST_FILES` if the
   test file isn't `test_<module>.py`). `conftest` hides the real .env and portfolio.yaml
   from every test, so results match between machines.
+- **Live feed** (`live_feed.py`): one process (launcher service `live`, compose service
+  `live`), so it runs only while the app runs. Finnhub's token must go in the websocket URL:
+  redact URLs/exceptions with `redact()` before logging or storing; tests assert the key never
+  reaches logs or the DB. OANDA token in the Authorization header only; prices are bid/ask mids;
+  OANDA has no volume, so VWAP uses tick counts. Reconnect backoff 1->60 s with jitter (5 min
+  after 401/403), reset after 60 s connected. Heartbeats: OANDA 15 s; Finnhub 15 s without a
+  trade during US hours. Gaps (> 10 s silence while open) go to `gaps` + logs. Tiles go red
+  when the *feed* is silent > 10 s while its market is open (thin symbols don't trade that often).
+  Readers (`tiles`, `gold_vwap`, `vwap_frame`) are pure; the app and webhook only read
+  live.sqlite. Tests use a local websockets server and an httpx streaming MockTransport; never
+  hit Finnhub/OANDA. `FORECASTER_LIVE_FINNHUB_URL` / `FORECASTER_LIVE_OANDA_URL` point it at
+  local simulators.
+- **Webhook live gold check** (`check_live_gold`): judged at receipt time. Wrong side of VWAP
+  by > 0.25σ -> skip (the setup's defining condition failed); slightly wrong side or past 2σ ->
+  caution; spot alert price > 0.3% off live -> caution (futures skip that, basis); missing or
+  > 10 s old -> unknown. Check data (price, vwap, sd, z) is journaled with the alert.
 - **Launcher** (`launcher.py`): binds everything to 127.0.0.1, restarts crashed services
   with backoff, one instance (data/launcher.pid). The webhook gets `--trust-proxy` only
   when cloudflared runs. Windows scripts must keep CRLF line endings (`.gitattributes`).
@@ -282,6 +299,7 @@ docker compose up -d                             # 24/7 private deployment (DEPL
 python -m forecaster.launcher --open             # all services without Docker (start.bat / start.sh)
 python -m forecaster.launcher --status|--stop|--check
 python -m forecaster.auth --write-env            # set the dashboard password in .env
+python -m forecaster.live_feed --check 30         # connect 30 s, print ticks per symbol (confirms feeds)
 python -m forecaster.project_status [--quick] [--send]   # STATUS.md: build, data, model, phase, next step
 ```
 

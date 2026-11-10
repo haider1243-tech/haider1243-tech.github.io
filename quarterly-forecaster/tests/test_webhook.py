@@ -55,6 +55,15 @@ class FakePost:
         return type("R", (), {"status_code": self.status, "json": lambda self: {"description": "Bad Request"}})()
 
 
+# a healthy live feed: gold 2,650.50, 1.4 sigma above its session VWAP, tick 0.4 s old
+LIVE_OK = {"price": 2650.5, "ts_ms": 0, "age_s": 0.4, "prev_close": 2640.0, "bars": 120,
+           "vwap": 2645.0, "sd": 4.0, "z": 1.375}
+
+
+def live_ok(now=None):
+    return dict(LIVE_OK)
+
+
 @pytest.fixture
 def env(tmp_path):
     settings = load_settings(root=tmp_path, env={
@@ -65,7 +74,7 @@ def env(tmp_path):
     write_json(snaps / "ticker_SPY.json", regime_snap())
     write_json(snaps / "market.json", market_snap())
     state = {"vix": vix_series()}
-    ctx = Context(settings, vix_loader=lambda: state["vix"])
+    ctx = Context(settings, vix_loader=lambda: state["vix"], live_loader=live_ok)
     post = FakePost()
     store = AlertStore(tmp_path / "data" / "alerts.sqlite")
     app = create_app(settings, store, ctx, TelegramNotifier("123:TOKEN", "42", post=post),
@@ -280,7 +289,7 @@ def test_telegram_failure_still_logs_alert_without_token(env, tmp_path):
     for post in (FakePost(status=400), FakePost(raise_exc=RuntimeError("https://api.telegram.org/bot123:TOKEN/x"))):
         settings = env["settings"]
         store = AlertStore(tmp_path / f"a{id(post)}.sqlite")
-        c = TestClient(create_app(settings, store, Context(settings, vix_loader=vix_series),
+        c = TestClient(create_app(settings, store, Context(settings, vix_loader=vix_series, live_loader=live_ok),
                                   TelegramNotifier("123:TOKEN", "42", post=post),
                                   clock=lambda: NOW, resolve_every_s=None))
         j = c.post("/tv-alert", json=body()).json()
@@ -291,7 +300,7 @@ def test_telegram_failure_still_logs_alert_without_token(env, tmp_path):
 def test_telegram_unconfigured_is_recorded(env, tmp_path):
     settings = env["settings"]
     store = AlertStore(tmp_path / "u.sqlite")
-    c = TestClient(create_app(settings, store, Context(settings, vix_loader=vix_series),
+    c = TestClient(create_app(settings, store, Context(settings, vix_loader=vix_series, live_loader=live_ok),
                               TelegramNotifier(None, None), clock=lambda: NOW, resolve_every_s=None))
     j = c.post("/tv-alert", json=body()).json()
     assert store.get(j["id"])["telegram_status"] == "error"
@@ -354,7 +363,7 @@ def test_outcomes_use_source_price_not_alert_price(env):
 
 def test_outcome_weekend_uses_last_close(env):
     fri = pd.Timestamp("2026-11-13 20:30", tz="UTC")
-    c = TestClient(create_app(env["settings"], env["store"], Context(env["settings"], vix_loader=vix_series),
+    c = TestClient(create_app(env["settings"], env["store"], Context(env["settings"], vix_loader=vix_series, live_loader=live_ok),
                               TelegramNotifier(None, None), clock=lambda: fri, resolve_every_s=None))
     c.post("/tv-alert", json=body(time="2026-11-13T20:30:00Z"))
     px = _prices("2026-11-13 18:00", periods=36)                     # trading stops 21:00 Friday
@@ -393,3 +402,72 @@ def test_outcome_stats(env):
 def test_health(env):
     assert env["client"].get("/health").json() == {"ok": True}
     assert env["client"].get("/docs").status_code == 404
+
+
+# --------------------------------------------------------------------------- #
+# Live gold check (current price + session VWAP from live_feed)
+# --------------------------------------------------------------------------- #
+
+def _live(**over):
+    d = dict(LIVE_OK)
+    d.update(over)
+    if "price" in over and "z" not in over:
+        d["z"] = (d["price"] - d["vwap"]) / d["sd"]
+    return d
+
+
+@pytest.mark.parametrize("side,price,level,text", [
+    ("long", 2650.5, "ok", "+1.4σ from session VWAP 2,645.00"),
+    ("long", 2644.6, "caution", "wrong side of VWAP"),          # -0.1σ: noise around VWAP
+    ("long", 2642.0, "skip", "already back below VWAP, the long setup has failed"),
+    ("long", 2654.0, "caution", "stretched past the 2σ band"),
+    ("short", 2640.0, "ok", "-1.2σ"),
+    ("short", 2648.0, "skip", "already back above VWAP, the short setup has failed"),
+    ("short", 2635.0, "caution", "stretched"),
+])
+def test_check_live_gold_levels(side, price, level, text):
+    from forecaster.webhook_server import check_live_gold
+    a = Alert.model_validate(body(side=side, price=str(price)))
+    c = check_live_gold(a, _live(price=price), RuleConfig())
+    assert c.level == level and text in c.reason, c.reason
+    assert c.data["price"] == price
+
+
+def test_check_live_gold_missing_stale_and_price_mismatch():
+    from forecaster.webhook_server import check_live_gold
+    cfg = RuleConfig()
+    a = Alert.model_validate(body(price="2650.40"))
+    assert check_live_gold(a, None, cfg).level == "unknown"                       # never escalates
+    stale = check_live_gold(a, _live(age_s=42.0), cfg)
+    assert stale.level == "unknown" and "42 s old" in stale.reason
+    early = check_live_gold(a, _live(z=None, vwap=None, sd=None), cfg)
+    assert early.level == "unknown" and "VWAP not formed yet" in early.reason
+    off = check_live_gold(Alert.model_validate(body(price="2670.00")), _live(), cfg)
+    assert off.level == "caution" and "+0.74% from live 2,650.50" in off.reason
+    both = check_live_gold(Alert.model_validate(body(price="2660.00")), _live(price=2640.0), cfg)
+    assert both.level == "skip" and "setup has failed" in both.reason and "from live 2,640.00" in both.reason
+    fut = check_live_gold(Alert.model_validate(body(ticker="GC1!", price="2672.00")), _live(), cfg)
+    assert fut.level == "ok"                                                       # futures basis: no price check
+
+
+def test_live_gold_drives_the_verdict(env):
+    c, state = env["client"], {"live": _live(price=2642.0)}
+    ctx = Context(env["settings"], vix_loader=vix_series, live_loader=lambda now: state["live"])
+    app = create_app(env["settings"], env["store"], ctx, TelegramNotifier(None, None),
+                     clock=lambda: NOW, resolve_every_s=None)
+    c = TestClient(app)
+    r = c.post("/tv-alert", json=body(price="2642.00", time="2026-11-09T14:05:00Z")).json()
+    assert r["verdict"] == "SKIP" and any("long setup has failed" in x for x in r["reasons"])
+    state["live"] = None
+    r = c.post("/tv-alert", json=body(time="2026-11-09T14:06:00Z")).json()
+    assert r["verdict"] == "CAUTION" and any("no live gold price" in x for x in r["reasons"])
+    state["live"] = _live()
+    r = c.post("/tv-alert", json=body(time="2026-11-09T14:07:00Z")).json()
+    assert r["verdict"] == "TAKE"
+    stored = json.loads(env["store"].get(r["id"])["checks"])
+    live = next(x for x in stored if x["name"] == "live_gold")
+    assert live["data"]["price"] == 2650.5 and live["data"]["z"] == pytest.approx(1.375)   # journaled
+    # non-gold alerts don't need the live feed
+    state["live"] = None
+    r = c.post("/tv-alert", json=body(ticker="SPY", price="600", time="2026-11-09T14:08:00Z")).json()
+    assert not any("live gold" in x for x in r["reasons"])

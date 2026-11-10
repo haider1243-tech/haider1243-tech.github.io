@@ -30,6 +30,14 @@ still asks for the password; nothing is public.
 Bottom tabs:
 - **This Week**: market regime, VIX, a 3-line plain-English outlook, and SPY / QQQ / gold
   4-quarter P10–P50–P90 fan charts (CAD).
+- **Live**: real-time tiles (SPY, QQQ, NVDA, AAPL, MSFT, your watchlist, gold, USD/CAD and a DXY proxy)
+  updating every second with % change on the day and a millisecond "last tick" time; a tile turns red
+  when its feed has been silent more than 10 s while its market is open. Below: gold 1-minute candles
+  with session VWAP and ±1σ/±2σ bands. A second view shows free TradingView charts (S&P 500, Nasdaq,
+  VIX, gold). Needs `FINNHUB_API_KEY` (stocks) and `OANDA_API_TOKEN` + `OANDA_ACCOUNT_ID` (practice
+  account is fine; prices only, no orders). The feeds run only while the app runs (start.bat starts
+  them). Check them with `python -m forecaster.live_feed --check 30`: it prints ticks per symbol.
+  Finnhub's free websocket streams US stocks; the `.TO` watchlist ETFs may never tick on it.
 - **Calendar**: the next 14 days of CPI, PPI, FOMC, jobs, GDP and earnings, colour- and label-coded
   by impact, with live countdowns.
 - **Gold VWAP**: gold vs its session VWAP, the latest TradingView alerts with TAKE / CAUTION / SKIP
@@ -185,6 +193,12 @@ with "Start in" set to the project folder.
 The computer must be on at that time; cron doesn't catch up on missed runs.
 
 ## TradingView webhook → Telegram
+
+Gold alerts (XAUUSD, GOLD, GC1!, MGC1!) are also checked against the **live** OANDA gold price and its
+session VWAP at the moment the alert arrives: a long whose price is already back below VWAP (or a
+short back above it) is SKIP; hovering on the wrong side or beyond the 2σ band is CAUTION; a spot alert
+price more than 0.3% from live is CAUTION. If the live feed is down or older than 10 s the check says
+"can't verify" (CAUTION, never SKIP).
 
 `src/forecaster/webhook_server.py` receives TradingView alerts, runs risk checks
 (regime, high-impact events in the next 24 h, news-sentiment shocks, VIX), and

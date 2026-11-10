@@ -297,3 +297,26 @@ def allocation_chart(items: list[dict], pal: dict, highlight_over: float | None 
     if highlight_over is not None:
         fig.add_vline(x=highlight_over, line=dict(color=pal["muted"], width=1, dash="dot"))
     return fig
+
+
+def live_gold_chart(df: pd.DataFrame, pal: dict, height: int = 320) -> go.Figure:
+    """1-minute gold candles with session VWAP and +-1 / +-2 sigma bands (live_feed.vwap_frame).
+    Up candles slot 1 (blue), down slot 2 (orange): red stays reserved for problems."""
+    fig = go.Figure()
+    x = df.index.tz_convert("America/New_York")
+    for k, dash, name in ((2, "dot", "±2σ"), (1, "dash", "±1σ")):
+        for sgn in (1, -1):
+            fig.add_trace(go.Scatter(x=x, y=df["vwap"] + sgn * k * df["sd"], mode="lines", name=name,
+                                     line=dict(color=pal["muted"], width=1, dash=dash), showlegend=sgn > 0,
+                                     hovertemplate=f"{'+' if sgn > 0 else '-'}{k}σ %{{y:,.2f}}<extra></extra>"))
+    fig.add_trace(go.Candlestick(
+        x=x, open=df["Open"], high=df["High"], low=df["Low"], close=df["Close"], name="XAU/USD 1m",
+        increasing=dict(line=dict(color=pal["s1"], width=1), fillcolor=pal["s1"]),
+        decreasing=dict(line=dict(color=pal["s2"], width=1), fillcolor=pal["s2"])))
+    fig.add_trace(go.Scatter(x=x, y=df["vwap"], mode="lines", name="Session VWAP",
+                             line=dict(color=pal["ink"], width=1.6), hovertemplate="VWAP %{y:,.2f}<extra></extra>"))
+    _layout(fig, pal, height, legend=False, y_format=",.0f")
+    fig.update_layout(margin=dict(l=4, r=6, t=6, b=4), dragmode=False, hovermode="x unified")
+    fig.update_xaxes(rangeslider_visible=False, nticks=5, tickformat="%H:%M", tickfont=dict(size=11))
+    fig.update_yaxes(nticks=5, tickfont=dict(size=11), side="right")
+    return fig

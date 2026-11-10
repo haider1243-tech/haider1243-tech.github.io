@@ -29,9 +29,9 @@ from forecaster.config import PROJECT_ROOT, load_settings  # noqa: E402
 
 st.set_page_config(page_title="Forecaster", page_icon="📈", layout="centered", initial_sidebar_state="collapsed")
 
-TABS = {"week": "This Week", "calendar": "Calendar", "gold": "Gold VWAP", "portfolio": "Portfolio",
+TABS = {"week": "This Week", "live": "Live", "calendar": "Calendar", "gold": "Gold VWAP", "portfolio": "Portfolio",
         "reports": "Reports", "status": "Status"}
-ICONS = ["📊", "📅", "🥇", "💼", "📄", "🚦"]
+ICONS = ["📊", "⚡", "📅", "🥇", "💼", "📄", "🚦"]
 PAL = viz.PALETTES["dark"]
 STATUS = {"good": "#0ca30c", "warning": "#fab219", "serious": "#ec835a", "critical": "#d03b3b"}
 settings = load_settings()
@@ -81,6 +81,7 @@ CSS = """<style>
 html, body { overscroll-behavior-y: none; }
 h1, h2, h3 { letter-spacing: -0.01em; }
 .st-key-pwa { display: none; }
+[data-testid="stHeaderActionElements"] { display: none !important; }   /* heading link icons */
 
 /* bottom tab bar: radiogroup > div[data-selected] > label > (span>input, div > (circle, markdown>p)) */
 .st-key-bottomnav { position: fixed; left: 0; right: 0; bottom: 0; z-index: 1000; background: #1a1a19;
@@ -102,6 +103,13 @@ h1, h2, h3 { letter-spacing: -0.01em; }
 .st-key-bottomnav [role="radiogroup"] > div[data-selected="true"] p::before { filter: none; }
 .st-key-bottomnav [role="radiogroup"] > div[data-selected="true"] [data-testid="stRadioOption"] { background: rgba(57,135,229,0.14); }
 """ + _nav_icons + """
+
+/* live tiles */
+.qf-tile.stale { background: #d03b3b !important; }
+.qf-tile.stale .k, .qf-tile.stale .d, .qf-tile.stale .v { color: #ffffff !important; }
+.qf-tile.closed, .qf-tile.off { opacity: 0.55; }
+.qf-tile .ms { font-variant-numeric: tabular-nums; font-size: 0.7rem; color: #898781; }
+.qf-tile.stale .ms { color: #ffffff; }
 
 /* cards, chips, badges */
 .qf-card { background: #1a1a19; border: 1px solid rgba(255,255,255,0.10); border-radius: 14px; padding: 12px 14px; margin: 0 0 10px; }
@@ -541,6 +549,103 @@ def tab_reports() -> None:
         st.markdown(r["md"].read_text())
 
 
+TV_SYMBOLS = {"SP:SPX": "S&P 500", "NASDAQ:IXIC": "Nasdaq", "TVC:VIX": "VIX", "OANDA:XAUUSD": "Gold"}
+
+
+def _fmt_price(sym: str, p: float | None) -> str:
+    if p is None:
+        return "—"
+    return f"{p:,.4f}" if sym in ("USD_CAD",) else f"{p:,.2f}"
+
+
+def _ms_time(ts_ms: int | None) -> str:
+    if not ts_ms:
+        return "no tick yet"
+    t = pd.Timestamp(ts_ms, unit="ms", tz="UTC").tz_convert(ad.NY)
+    return f"{t:%H:%M:%S}.{t.microsecond // 1000:03d} ET"
+
+
+def tab_live() -> None:
+    from forecaster import live_feed as lf
+    from forecaster.config import load_watchlist
+
+    header("Live")
+    view = st.radio("View", ["feed", "tv"], horizontal=True, key="live_view", label_visibility="collapsed",
+                    format_func={"feed": "⚡ Live feed", "tv": "📈 TradingView"}.get)
+    if view == "tv":
+        tradingview_block()
+        return
+    db = lf.live_db(settings.cache_dir)
+    stocks = lf.finnhub_symbols(load_watchlist(PROJECT_ROOT / "watchlist.yaml"))
+
+    @st.fragment(run_every="1s")
+    def tiles() -> None:
+        now = now_utc()
+        chips = []
+        for t in lf.tiles(db, now, stocks):
+            chg = "" if t.change is None else f"{t.change:+.2%} today"
+            label = ("⚠ STALE · " if t.state == "stale" else "") + t.label
+            chips.append(f'<div class="qf-chip qf-tile {t.state}" style="flex:1 1 105px">'
+                         f'<div class="k">{esc(label)}</div><div class="v">{esc(_fmt_price(t.symbol, t.price))}</div>'
+                         f'<div class="d">{esc(chg or t.note)}</div><div class="ms">{esc(_ms_time(t.ts_ms))}</div></div>')
+        st.html('<div class="qf-row">' + "".join(chips) + "</div>")
+        feeds, gaps = lf.read_feeds(db), lf.read_gaps(db, int((now - pd.Timedelta(hours=24)).value // 1_000_000))
+        lines = []
+        for name, label in (("finnhub", "Finnhub (stocks)"), ("oanda", "OANDA (gold, FX)")):
+            f = feeds.get(name)
+            if not f:
+                lines.append(f"{label}: not running. It starts with start.bat.")
+                continue
+            age = "" if not f.get("last_msg_ms") else \
+                f" · last message {(now.value // 1_000_000 - f['last_msg_ms']) / 1000:.1f} s ago"
+            g = [x for x in gaps if x["feed"] == name]
+            gap = f" · {len(g)} gap(s) in 24 h, longest {max(x['seconds'] for x in g):.0f} s" if g else ""
+            detail = f" ({f['detail']})" if f.get("detail") and f.get("status") != "connected" else ""
+            lines.append(f"{label}: {f['status']}{detail}{age} · {f.get('reconnects') or 0} reconnects{gap}")
+        st.caption("  \n".join(lines) + "  \nA tile turns red when its feed has been silent for more than 10 s "
+                   "while its market is open. % change is vs the previous close.")
+
+    tiles()
+
+    @st.fragment(run_every="5s")
+    def gold() -> None:
+        now = now_utc()
+        df = lf.vwap_frame(db, now, hours=4)
+        g = lf.gold_vwap(db, now)
+        st.markdown("**Gold 1-minute · session VWAP ±1σ/±2σ**")
+        if df.empty:
+            st.caption("No gold bars yet this session (sessions start 18:00 New York; needs the OANDA feed).")
+            return
+        st.plotly_chart(viz.live_gold_chart(df, PAL), width="stretch",
+                        config={"displayModeBar": False, "scrollZoom": False}, key="live_gold_chart")
+        if g and g.get("z") is not None:
+            st.caption(f"Live {g['price']:,.2f} · VWAP {g['vwap']:,.2f} · {g['z']:+.1f}σ · tick volume "
+                       f"(OANDA has no traded volume, same as TradingView's OANDA:XAUUSD). Blue = up candle, "
+                       "orange = down. The webhook checks gold alerts against this live price.")
+
+    gold()
+
+
+def tradingview_block() -> None:
+    import json as _json
+
+    import streamlit.components.v1 as components
+
+    sym = st.radio("Symbol", list(TV_SYMBOLS), horizontal=True, key="tv_sym", label_visibility="collapsed",
+                   format_func=TV_SYMBOLS.get)
+    cfg = {"autosize": True, "symbol": sym, "interval": "1", "timezone": "America/New_York", "theme": "dark",
+           "style": "1", "locale": "en", "backgroundColor": "#0d0d0d", "gridColor": "rgba(255,255,255,0.06)",
+           "hide_side_toolbar": True, "hide_volume": sym != "OANDA:XAUUSD", "allow_symbol_change": False,
+           "save_image": False, "calendar": False, "studies": ["STD;VWAP"] if sym == "OANDA:XAUUSD" else [],
+           "support_host": "https://www.tradingview.com"}
+    components.html(f"""<div class="tradingview-widget-container" style="height:100%;width:100%">
+      <div class="tradingview-widget-container__widget" style="height:100%;width:100%"></div>
+      <script type="text/javascript" src="https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js"
+        async>{_json.dumps(cfg)}</script></div>""", height=460)
+    st.caption("Free TradingView widget, loaded straight from TradingView in your browser (no keys involved). "
+               "TradingView decides which feeds are real-time in widgets; delayed ones are marked with a D.")
+
+
 STATE_COLOR = {"built": "good", "failing": "warning", "missing": "critical", "unchecked": "serious"}
 
 
@@ -637,6 +742,6 @@ if st.query_params.get("tab") != tab:
     st.query_params["tab"] = tab
 
 {"week": tab_week, "calendar": tab_calendar, "gold": tab_gold, "portfolio": tab_portfolio,
- "reports": tab_reports, "status": tab_status}[tab]()
+ "reports": tab_reports, "status": tab_status, "live": tab_live}[tab]()
 if tab not in ("portfolio",):
     settings_footer()

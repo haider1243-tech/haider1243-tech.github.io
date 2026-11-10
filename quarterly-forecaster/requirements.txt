@@ -17,6 +17,7 @@ plotly>=5.20
 fastapi>=0.110    # webhook_server.py
 uvicorn>=0.29
 httpx>=0.27
+websockets>=13.0  # live_feed.py (Finnhub trades websocket)
 apscheduler>=3.10,<4  # monitor.py
 reportlab>=4.0  # weekly_report.py PDF
 

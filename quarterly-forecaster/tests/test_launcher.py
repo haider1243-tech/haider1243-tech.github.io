@@ -9,7 +9,8 @@ from forecaster import launcher as L
 
 def test_services_bind_loopback_only(tmp_path):
     svcs = {s.name: s.argv for s in L.build_services(tmp_path, python="py")}
-    assert set(svcs) == {"monitor", "webhook", "dashboard"}
+    assert set(svcs) == {"monitor", "live", "webhook", "dashboard"}
+    assert svcs["live"] == ["py", "-m", "forecaster.live_feed"]
     assert svcs["monitor"] == ["py", "-m", "forecaster.monitor"]
     w = svcs["webhook"]
     assert w[w.index("--host") + 1] == "127.0.0.1" and "--trust-proxy" not in w

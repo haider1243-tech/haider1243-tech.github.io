@@ -59,6 +59,11 @@ HORIZONS: dict[str, pd.Timedelta] = {"1h": pd.Timedelta(hours=1), "4h": pd.Timed
                                      "1d": pd.Timedelta(days=1)}
 NY = "America/New_York"
 
+# TradingView gold symbols checked against the live OANDA XAU_USD price + session VWAP.
+# Spot symbols also have their alert price compared with live spot (futures carry a basis).
+LIVE_GOLD_SPOT = ("XAUUSD", "GOLD")
+LIVE_GOLD = (*LIVE_GOLD_SPOT, "GC1!", "MGC1!")
+
 # TradingView symbol -> (forecaster ticker for regime, price symbol for outcomes,
 # news tags whose sentiment shocks matter). Gold watches the "gold" news topic,
 # not general market news: bad equity news is often good for gold.
@@ -178,6 +183,10 @@ class RuleConfig:
     snapshot_max_age_days: float = 8.0
     vix_max_age_days: float = 4.0
     cautions_to_skip: int = 3          # this many real cautions -> skip
+    live_max_age_s: float = 10.0       # live gold tick older than this -> can't verify
+    live_wrong_side_z: float = 0.25    # long this far below VWAP (short: above) -> skip (setup failed)
+    live_stretch_z: float = 2.0        # beyond the 2-sigma band in the trade direction -> caution
+    live_price_dev: float = 0.003      # alert price vs live spot > 0.3% -> caution
 
 
 @dataclass
@@ -295,6 +304,44 @@ def check_vix(vix: pd.Series | None, now: pd.Timestamp, cfg: RuleConfig) -> Chec
     return Check("vix", "ok", f"VIX {last:.1f} ({chg:+.0%} 1d)", data)
 
 
+def check_live_gold(alert: Alert, live: dict | None, cfg: RuleConfig) -> Check:
+    """Gold alert vs the live price and session VWAP (live_feed.gold_vwap). The strategy goes long
+    only above VWAP and short only below it, so by the time the alert lands the price must still
+    be on the right side. Missing/stale live data is "unknown" (never escalates to SKIP)."""
+    if live is None:
+        return Check("live_gold", "unknown", "no live gold price (live feed not running)")
+    if live["age_s"] > cfg.live_max_age_s:
+        return Check("live_gold", "unknown", f"live gold price is {live['age_s']:.0f} s old", {"age_s": live["age_s"]})
+    p = live["price"]
+    data = {k: live.get(k) for k in ("price", "vwap", "sd", "z", "age_s")}
+    dev = alert.price / p - 1
+    data["alert_vs_live"] = dev
+    parts = []
+    level = "ok"
+    if alert.symbol in LIVE_GOLD_SPOT and abs(dev) > cfg.live_price_dev:
+        level = "caution"
+        parts.append(f"alert price {alert.price:,.2f} is {dev:+.2%} from live {p:,.2f} (stale alert?)")
+    if live.get("z") is None:
+        return Check("live_gold", "caution" if level == "caution" else "unknown",
+                     "; ".join(parts + [f"live gold {p:,.2f}, session VWAP not formed yet"]), data)
+    z = live["z"]
+    signed = z if alert.side == "long" else -z                 # > 0 = on the trade's side of VWAP
+    where = f"live gold {p:,.2f} is {z:+.1f}σ from session VWAP {live['vwap']:,.2f}"
+    if signed < -cfg.live_wrong_side_z:
+        side = "below" if alert.side == "long" else "above"
+        return Check("live_gold", "skip", "; ".join(
+            [f"{where}: already back {side} VWAP, the {alert.side} setup has failed", *parts]), data)
+    if signed < 0:
+        level = "caution"
+        parts.append(f"{where}: hovering on the wrong side of VWAP")
+    elif signed > cfg.live_stretch_z:
+        level = "caution"
+        parts.append(f"{where}: stretched past the 2σ band")
+    else:
+        parts.append(where)
+    return Check("live_gold", level, "; ".join(parts), data)
+
+
 def decide(checks: list[Check], cfg: RuleConfig) -> tuple[str, list[str]]:
     """SKIP if any check says skip or >= cautions_to_skip real cautions; CAUTION if any
     caution or missing data; else TAKE. Missing data never escalates to SKIP."""
@@ -316,11 +363,24 @@ def decide(checks: list[Check], cfg: RuleConfig) -> tuple[str, list[str]]:
 class Context:
     def __init__(self, settings: Settings,
                  vix_loader: Callable[[], pd.Series | None] | None = None,
-                 fx_loader: Callable[[], float | None] | None = None) -> None:
+                 fx_loader: Callable[[], float | None] | None = None,
+                 live_loader: Callable[[pd.Timestamp], dict | None] | None = None) -> None:
         self.settings = settings
         self.snap_dir = Path(settings.cache_dir) / "snapshots"
         self._vix_loader = vix_loader or self._cached_vix
         self._fx_loader = fx_loader
+        self._live_loader = live_loader
+
+    def live_gold(self, now: pd.Timestamp) -> dict | None:
+        """Live gold vs session VWAP from data/live.sqlite (written by live_feed). Local file only."""
+        if self._live_loader is not None:
+            return self._live_loader(now)
+        try:
+            from forecaster.live_feed import gold_vwap, live_db
+
+            return gold_vwap(live_db(self.settings.cache_dir), now)
+        except Exception:
+            return None
 
     def ticker_snapshot(self, ticker: str) -> tuple[dict | None, str, bool]:
         s = read_json(self.snap_dir / f"ticker_{safe_name(ticker)}.json")
@@ -367,6 +427,9 @@ def evaluate_alert(alert: Alert, t: pd.Timestamp, ctx: Context, cfg: RuleConfig)
         check_sentiment(market, alert.side, t, cfg, tags),
         check_vix(ctx.vix(), t, cfg),
     ]
+    if alert.symbol in LIVE_GOLD:
+        # the live price is judged at receipt time: that is when a trade would actually be placed
+        checks.append(check_live_gold(alert, ctx.live_gold(pd.Timestamp.now(tz="UTC")), cfg))
     verdict, reasons = decide(checks, cfg)
     return verdict, reasons, checks
 

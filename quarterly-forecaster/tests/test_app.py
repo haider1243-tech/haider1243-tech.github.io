@@ -85,7 +85,7 @@ def _go(at, tab):
 
 
 def test_bottom_tabs_and_last_updated_on_every_tab(app):
-    assert app.radio(key="tab").options == ["Week", "Calendar", "Gold", "Portfolio", "Reports", "Status"]
+    assert app.radio(key="tab").options == ["Week", "Live", "Calendar", "Gold", "Portfolio", "Reports", "Status"]
     for tab, title in (("week", "This Week"), ("calendar", "Calendar"), ("gold", "Gold VWAP"),
                        ("portfolio", "Portfolio"), ("reports", "Reports"), ("status", "Status")):
         at = _go(app, tab)
@@ -214,6 +214,37 @@ def test_status_tab(app, monkeypatch):
     at.button(key="recheck").click().run()
     assert not at.exception, at.exception
     txt = _text(at)
-    assert calls and "99 tests passed" in txt and "12/12 modules ✅" in txt
+    assert calls and "99 tests passed" in txt and "13/13 modules ✅" in txt
     assert "Add FINNHUB_API_KEY to .env" in txt or "Add FRED_API_KEY to .env" in txt
     ps.status_json(calls[0]).unlink()
+
+
+def test_live_tab_tiles_chart_and_tradingview(app, data):
+    from forecaster import live_feed as lf
+
+    d, _ = data
+    now_ms = int(NOW.value // 1_000_000)
+    hub = lf.Hub(clock=lambda: now_ms)
+    store = lf.LiveStore(lf.live_db(d))
+    for i in range(30):                                  # 30 one-minute gold bars ending now
+        hub.add(lf.Tick(lf.GOLD, 2640 + 0.3 * i, now_ms - (30 - i) * 60_000, 0, "oanda"))
+    hub.add(lf.Tick("SPY", 601.25, now_ms - 400, 10, "finnhub"))
+    for name in ("oanda", "finnhub"):
+        hub.feed(name).status, hub.feed(name).last_msg_ms = "connected", now_ms - 300
+    hub.flush(store)
+    store.set_prev_close({"SPY": 600.0})
+    at = _go(app, "live")
+    txt = _text(at)
+    assert "Gold (XAU/USD)" in txt and "601.25" in txt and "DXY (proxy)" in txt
+    assert ".%03d ET" % ((now_ms - 400) % 1000) in txt                       # ms timestamp on the tile
+    assert "Finnhub (stocks): connected" in txt and "OANDA (gold, FX): connected" in txt
+    assert "silent for more than 10 s" in txt
+    assert len(at.get("plotly_chart")) == 1 and "VWAP" in txt
+    at.radio(key="live_view").set_value("tv").run()
+    assert not at.exception, at.exception
+    assert "TradingView decides which feeds are real-time" in _text(at)
+    assert at.radio(key="tv_sym").options == ["S&P 500", "Nasdaq", "VIX", "Gold"]
+    at.radio(key="tv_sym").set_value("OANDA:XAUUSD").run()
+    assert not at.exception
+    at.radio(key="live_view").set_value("feed").run()
+    lf.live_db(d).unlink()

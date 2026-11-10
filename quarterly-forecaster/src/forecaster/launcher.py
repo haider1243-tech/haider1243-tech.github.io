@@ -111,6 +111,7 @@ def build_services(root: Path = PROJECT_ROOT, python: str = sys.executable,
         webhook.append("--trust-proxy")           # only cloudflared can reach it, so its CF-Connecting-IP is real
     svcs = [
         Service("monitor", [python, "-m", "forecaster.monitor"]),
+        Service("live", [python, "-m", "forecaster.live_feed"]),    # Finnhub + OANDA streams, only while running
         Service("webhook", webhook),
         Service("dashboard", [python, "-m", "streamlit", "run", str(root / "app.py"),
                               "--server.address", "127.0.0.1", "--server.port", str(DASHBOARD_PORT),
