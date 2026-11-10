@@ -73,6 +73,10 @@ services:
       retries: 3
       start_period: 2m
 
+  shadow:
+    <<: *app
+    command: ["python", "-m", "forecaster.shadow"]      # paper trading only: no orders, no ports
+
   cloudflared:
     image: cloudflare/cloudflared:2026.10.7   # tested: `ingress validate` + rule checks (DEPLOY.md)
     command: ["tunnel", "--no-autoupdate", "--config", "/etc/cloudflared/config.yml", "run"]

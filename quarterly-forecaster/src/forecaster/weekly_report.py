@@ -586,6 +586,17 @@ def main(argv: list[str] | None = None) -> int:  # pragma: no cover
 
             ok, err = tg.send(telegram_text(status))
             print("telegram status:", "sent" if ok else f"not sent ({err})")
+    try:   # shadow trading vs backtest, per setup (strategy decay)
+        from forecaster.shadow import decay_text, weekly_decay
+
+        txt = decay_text(weekly_decay(settings.cache_dir))
+        if txt:
+            print(txt)
+            if not args.no_send:
+                ok, err = TelegramNotifier(settings.telegram_bot_token, settings.telegram_chat_id).send(txt)
+                print("telegram decay:", "sent" if ok else f"not sent ({err})")
+    except Exception as exc:
+        warn(f"shadow decay report: {exc}")
     return 0
 
 

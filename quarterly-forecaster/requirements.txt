@@ -23,3 +23,4 @@ reportlab>=4.0  # weekly_report.py PDF
 
 # Dev / test
 pytest>=8.0
+backtesting>=0.6  # reference engine for tests/test_lab_engine.py parity check

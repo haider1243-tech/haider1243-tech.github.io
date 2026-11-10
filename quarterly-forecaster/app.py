@@ -29,9 +29,9 @@ from forecaster.config import PROJECT_ROOT, load_settings  # noqa: E402
 
 st.set_page_config(page_title="Forecaster", page_icon="📈", layout="centered", initial_sidebar_state="collapsed")
 
-TABS = {"week": "This Week", "live": "Live", "calendar": "Calendar", "gold": "Gold VWAP", "portfolio": "Portfolio",
+TABS = {"week": "This Week", "live": "Live", "signals": "Signals", "calendar": "Calendar", "gold": "Gold VWAP", "portfolio": "Portfolio",
         "reports": "Reports", "status": "Status"}
-ICONS = ["📊", "⚡", "📅", "🥇", "💼", "📄", "🚦"]
+ICONS = ["📊", "⚡", "🎯", "📅", "🥇", "💼", "📄", "🚦"]
 PAL = viz.PALETTES["dark"]
 STATUS = {"good": "#0ca30c", "warning": "#fab219", "serious": "#ec835a", "critical": "#d03b3b"}
 settings = load_settings()
@@ -110,6 +110,12 @@ h1, h2, h3 { letter-spacing: -0.01em; }
 .qf-tile.closed, .qf-tile.off { opacity: 0.55; }
 .qf-tile .ms { font-variant-numeric: tabular-nums; font-size: 0.7rem; color: #898781; }
 .qf-tile.stale .ms { color: #ffffff; }
+
+/* signals */
+.qf-setup.noedge { opacity: 0.42; filter: grayscale(0.8); }
+.qf-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; margin: 6px 0 0; }
+.qf-stats div { background: #232322; border-radius: 8px; padding: 5px 7px; font-size: 0.72rem; color: #898781; }
+.qf-stats b { display: block; color: #f0efec; font-size: 0.88rem; font-weight: 600; }
 
 /* cards, chips, badges */
 .qf-card { background: #1a1a19; border: 1px solid rgba(255,255,255,0.10); border-radius: 14px; padding: 12px 14px; margin: 0 0 10px; }
@@ -646,6 +652,220 @@ def tradingview_block() -> None:
                "TradingView decides which feeds are real-time in widgets; delayed ones are marked with a D.")
 
 
+VERDICT_COLOR = {"EDGE": "#0ca30c", "WEAK": "#fab219", "NO EDGE": "#5d5c58"}
+
+
+def _bps(x) -> str:
+    return "n/a" if x is None else f"{x * 1e4:+.1f} bps"
+
+
+def _pct(x, d=0) -> str:
+    return "n/a" if x is None else f"{x:.{d}%}"
+
+
+def _costs_txt(c: dict) -> str:
+    return (f"commission {c.get('commission', 0):g}/unit per side, spread {c.get('spread', 0):g} "
+            f"(or the bar's real bid/ask), slippage {c.get('slippage', 0):g} on market and stop fills")
+
+
+def _pval(p) -> str:
+    return "n/a" if p is None else f"{p:.3f}"
+
+
+def _ci(ci) -> str:
+    return "n/a" if not ci else f"{ci[0] * 1e4:+.1f} to {ci[1] * 1e4:+.1f} bps"
+
+
+def _verdict_badge(v: str) -> str:
+    fg = "#ffffff" if v == "NO EDGE" else "#0b0b0b"
+    return f'<span class="qf-badge" style="background:{VERDICT_COLOR.get(v, "#5d5c58")};color:{fg}">{esc(v)}</span>'
+
+
+def _lab_doc() -> dict | None:
+    from forecaster import lab as L
+
+    p = L.lab_dir(settings.cache_dir) / "results.json"
+    return _read(str(p), _mtime(p))
+
+
+def tab_signals() -> None:
+    header("Signals")
+    view = st.radio("View", ["board", "leaders", "lab"], horizontal=True, key="sig_view", label_visibility="collapsed",
+                    format_func={"board": "🎯 Board", "leaders": "🏆 Leaderboard", "lab": "🧪 Lab"}.get)
+    doc = _lab_doc()
+    if not doc:
+        st.info("No Strategy Lab results yet. On the PC run `python -m forecaster.lab download --years 3` "
+                "(needs OANDA + Alpaca keys), then `python -m forecaster.lab run`.", icon="🧪")
+        return
+    if doc.get("synthetic"):
+        st.html('<div class="qf-banner" style="background:#8a5a00"><b>⚠ Demo results from synthetic random-walk data</b>'
+                "Not real markets: every setup should read NO EDGE here. Download real data and rerun the lab.</div>")
+    {"board": signal_board, "leaders": leaderboard_view, "lab": lab_view}[view](doc)
+
+
+def _setup_card(s: dict, side: int, lines: list[str], when: str, extra: str = "") -> str:
+    side_name = "long" if side > 0 else "short"
+    o = (s.get("oos_by_side") or {}).get(side_name) or s["oos"]
+    ci = (s.get("side_ci") or {}).get(side_name) or s.get("ci")
+    v = s["verdict"]
+    col = "#3987e5" if side > 0 else "#d95926"
+    cls = "qf-setup noedge" if v == "NO EDGE" else "qf-setup"
+    pv = _pval(s.get("p_value"))
+    stats = (f'<div class="qf-stats"><div>Win rate<b>{_pct(o.get("win_rate"))}</b></div>'
+             f'<div>Expectancy<b>{_bps(o.get("expectancy"))}</b></div><div>Sample<b>{o.get("trades", 0)} trades</b></div>'
+             f'<div style="grid-column:span 2">95% CI<b>{esc(_ci(ci))}</b></div><div>p vs random<b>{pv}</b></div></div>')
+    return (f'<div class="qf-card {cls}" style="border-left:4px solid {col}">'
+            f'<div style="display:flex;justify-content:space-between;gap:8px"><div><b>{esc(s["name"])}</b>'
+            f'<div class="qf-muted">{esc(s["instrument"])} · {esc(s["timeframe"])} · {esc(when)}</div></div>'
+            f'<div>{_verdict_badge(v)}</div></div>'
+            f'<div style="margin-top:6px;font-size:0.95rem"><b style="color:{col}">{side_name.upper()}</b> · '
+            + " · ".join(esc(x) for x in lines) + f"</div>{stats}{extra}</div>")
+
+
+def signal_board(doc: dict) -> None:
+    from forecaster import shadow as SH
+
+    by_key = {s["key"]: s for s in doc["setups"]}
+    db = SH.shadow_db(settings.cache_dir)
+
+    @st.fragment(run_every="5s")
+    def board() -> None:
+        now = now_utc()
+        pending = [p for p in SH.read_pending(db, pd.Timedelta(minutes=20), now) if p["key"] in by_key]
+        open_t = SH.read_trades(db, "open")
+        rank = {"EDGE": 0, "WEAK": 1, "NO EDGE": 2}
+        cards = []
+        for p in sorted(pending, key=lambda p: rank.get(by_key[p["key"]]["verdict"], 3)):
+            s = by_key[p["key"]]
+            rr = abs(p["target"] - p["ref"]) / max(abs(p["ref"] - p["stop"]), 1e-9)
+            when = "setup " + ad.ago(pd.Timestamp(p["signal_time"]), now) + ", entry at the next bar's open"
+            cards.append(_setup_card(s, p["side"], [f"entry ≈ {p['ref']:,.2f}", f"stop {p['stop']:,.2f}",
+                                                    f"target {p['target']:,.2f}", f"R:R {rr:.1f}"], when))
+        for _, t in (open_t.iterrows() if len(open_t) else []):
+            s = by_key.get(t["key"])
+            if s is None:
+                continue
+            cards.append(_setup_card(s, int(t["side"]), [f"in at {t['entry']:,.2f}", f"stop {t['stop']:,.2f}",
+                                                         f"target {t['target']:,.2f}"],
+                                     "shadow trade open since " + ad.ago(pd.Timestamp(t["entry_time"]), now)))
+        hb = SH.heartbeat(db)
+        alive = hb is not None and (now - hb) < pd.Timedelta(minutes=2)
+        st.caption(("🟢 Shadow trading running" if alive else "⚪ Shadow trading not running (starts with start.bat)")
+                   + (f" · last pass {ad.ago(hb, now)}" if hb else "")
+                   + ". Setups appear here the moment a strategy triggers on the live feed. Paper only: "
+                     "nothing is ever ordered.")
+        if cards:
+            st.html("".join(cards))
+        else:
+            st.info("No setups right now. Greyed cards = NO EDGE (historically indistinguishable from luck).", icon="🎯")
+        closed = SH.read_trades(db, "closed")
+        if len(closed):
+            c = closed.head(8)
+            st.markdown("**Recent shadow trades**")
+            st.html("".join(
+                f'<div class="qf-item" style="border-left-color:{"#3987e5" if r.net_ret > 0 else "#d95926"}">'
+                f'<div style="min-width:0"><div class="t">{esc(by_key.get(r.key, {}).get("name", r.key))} · '
+                f'{esc(r.instrument)} {esc(r.timeframe)}</div><div class="s">{"LONG" if r.side > 0 else "SHORT"} '
+                f'{r.entry:,.2f} → {r.exit:,.2f} · {esc(r.reason)}</div></div><div class="r">{_bps(r.net_ret)}</div></div>'
+                for r in c.itertuples()))
+
+    board()
+
+
+def leaderboard_view(doc: dict) -> None:
+    from forecaster import lab as L
+    from forecaster import shadow as SH
+
+    c1, c2 = st.columns(2)
+    inst = c1.selectbox("Instrument", ["All", "SPY", "QQQ", "XAU_USD"], key="lb_inst")
+    tf = c2.selectbox("Timeframe", ["All", "5m", "15m", "1m", "1h"], key="lb_tf")
+    rows = L.leaderboard(doc, None if inst == "All" else inst, None if tf == "All" else tf)
+    live = SH.read_trades(SH.shadow_db(settings.cache_dir), "closed")
+    m = rows[0]["setups_tested"] if rows else 0
+    st.caption(f"Ranked by out-of-sample expectancy per trade after costs. {m} setups tested, so a few "
+               f"will pass p < 0.05 by luck; ★ = also passes the stricter p < {0.05 / max(m, 1):.4f} "
+               "(Bonferroni). Greyed = NO EDGE.")
+    out = []
+    for n, s in enumerate(rows, 1):
+        o = s["oos"]
+        lt = live[live["key"] == s["key"]]["net_ret"].dropna() if len(live) else pd.Series(dtype=float)
+        live_txt = f" · live {_bps(lt.mean())} ({len(lt)})" if len(lt) else ""
+        star = " ★" if s.get("bonferroni_ok") else ""
+        cls = "qf-setup noedge" if s["verdict"] == "NO EDGE" else "qf-setup"
+        out.append(f'<div class="qf-item {cls}" style="border-left-color:{VERDICT_COLOR.get(s["verdict"])}">'
+                   f'<div style="min-width:0"><div class="t">{n}. {esc(s["name"])}{star}</div>'
+                   f'<div class="s">{esc(s["instrument"])} · {esc(s["timeframe"])} · {o["trades"]} OOS trades · '
+                   f'win {_pct(o.get("win_rate"))} · p {_pval(s["p_value"])}'
+                   f'{esc(live_txt)}</div></div><div class="r">{_bps(o.get("expectancy"))}<div style="margin-top:3px">'
+                   f'{_verdict_badge(s["verdict"])}</div></div></div>')
+    st.html("".join(out) if out else '<div class="qf-muted">No setups for this filter.</div>')
+
+
+def lab_view(doc: dict) -> None:
+    from forecaster import lab as L
+
+    rows = L.leaderboard(doc)
+    keys = [s["key"] for s in rows]
+    by = {s["key"]: s for s in rows}
+    k = st.selectbox("Setup", keys, key="lab_pick",
+                     format_func=lambda k: f"{by[k]['name']} · {by[k]['instrument']} {by[k]['timeframe']} · {by[k]['verdict']}")
+    s = by[k]
+    o, i = s["oos"], s["is"]
+    st.html(f'<div class="qf-card"><div style="display:flex;justify-content:space-between"><b>{esc(s["name"])}</b>'
+            f'{_verdict_badge(s["verdict"])}</div><div class="qf-muted" style="margin-top:4px">'
+            + "<br>".join(esc(w) for w in s["why"]) + "</div></div>")
+    for w in s.get("warnings", []):
+        st.warning(f"Overfitting: {w}", icon="⚠️")
+    if s["verdict"] == "EDGE" and not s.get("bonferroni_ok"):
+        st.warning(f"Passes p < 0.05 but not the multiple-testing bar for {s['setups_tested']} setups: "
+                   "could still be the lucky one in the batch. Watch its shadow trades.", icon="⚠️")
+    cells = [("Trades (OOS)", str(o["trades"])), ("Win rate", _pct(o.get("win_rate"))),
+             ("Expectancy", _bps(o.get("expectancy"))), ("Avg win", _bps(o.get("avg_win"))),
+             ("Avg loss", _bps(o.get("avg_loss"))),
+             ("Profit factor", "n/a" if o.get("profit_factor") is None else f"{o['profit_factor']:.2f}"),
+             ("Sharpe", "n/a" if o.get("sharpe") is None else f"{o['sharpe']:.2f}"),
+             ("Max drawdown", f"{o['max_dd']:.1%}"), ("Losing streak", str(o["losing_streak"])),
+             ("95% CI", _ci(s.get("ci"))), ("p vs random", "n/a" if s["p_value"] is None else f"{s['p_value']:.3f}"),
+             ("In-sample exp.", _bps(i.get("expectancy")))]
+    st.html('<div class="qf-stats" style="margin-bottom:10px">' + "".join(
+        f"<div>{esc(a)}<b>{esc(b)}</b></div>" for a, b in cells) + "</div>")
+    dd95 = (s.get("mc") or {}).get("dd_p95")
+    dd_txt = "n/a" if dd95 is None else f"{dd95:.1%}"
+    st.caption(f"Out-of-sample = walk-forward: tuned on 12 months, traded on the next 3 unseen months, rolled "
+               f"{len(s['folds'])} times. Costs: {_costs_txt(s['costs'])}. Shuffling the trade order, the worst 5% "
+               f"of paths draw down {dd_txt}.")
+    if s["random"]["hist"]:
+        st.markdown("**This setup vs 1,000 random-entry strategies** (same trades, holding times, costs)")
+        st.plotly_chart(viz.lab_random_hist(s["random"]["edges"], s["random"]["hist"], o["expectancy"] or 0, PAL),
+                        width="stretch", config={"displayModeBar": False}, key="lab_hist")
+    if s["equity"]:
+        st.markdown("**Out-of-sample equity** (one unit per trade)")
+        st.plotly_chart(viz.lab_equity(s["equity"], PAL), width="stretch", config={"displayModeBar": False},
+                        key="lab_eq")
+    sl = st.selectbox("Slice results by", ["time_of_day", "weekday", "vix_band", "event_day", "year", "month", "week"],
+                      key="lab_slice", format_func=lambda x: {"time_of_day": "Time of day (NY)", "weekday": "Day of week",
+                                                             "vix_band": "VIX band (prior close)",
+                                                             "event_day": "CPI / PPI / FOMC days", "year": "Year",
+                                                             "month": "Month", "week": "Week"}[x])
+    rows_s = s["slices"].get(sl) or []
+    if sl in ("month", "week") and len(rows_s) > 24:
+        rows_s = rows_s[-24:]
+        st.caption("Latest 24 shown.")
+    if rows_s and not all(r["key"] == "unknown" for r in rows_s):
+        st.plotly_chart(viz.lab_slices(rows_s, PAL), width="stretch", config={"displayModeBar": False}, key="lab_sl")
+    else:
+        st.caption("Not available for this run (VIX history or FRED event dates were missing).")
+    with st.expander("Walk-forward windows & parameters"):
+        st.dataframe(pd.DataFrame([{"Test window": f"{f['test'][0]} → {f['test'][1]}",
+                                    "Chosen": ", ".join(f"{a}={b}" for a, b in f["best"].items()) or "—",
+                                    "IS": _bps(f["is_expectancy"]), "OOS": _bps(f["oos_expectancy"]),
+                                    "OOS trades": f["oos_trades"]} for f in s["folds"]]),
+                     hide_index=True, width="stretch")
+        st.caption(f"Tuned: {', '.join(s['tuned']) or 'nothing'} ({s['combos']} combinations per window). "
+                   f"Current parameters (used by shadow trading): {esc(str(s['params']))}")
+        st.caption(s["description"])
+
+
 STATE_COLOR = {"built": "good", "failing": "warning", "missing": "critical", "unchecked": "serious"}
 
 
@@ -742,6 +962,6 @@ if st.query_params.get("tab") != tab:
     st.query_params["tab"] = tab
 
 {"week": tab_week, "calendar": tab_calendar, "gold": tab_gold, "portfolio": tab_portfolio,
- "reports": tab_reports, "status": tab_status, "live": tab_live}[tab]()
+ "reports": tab_reports, "status": tab_status, "live": tab_live, "signals": tab_signals}[tab]()
 if tab not in ("portfolio",):
     settings_footer()

@@ -54,12 +54,18 @@ src/forecaster/
   appdata.py       # pure helpers for the app tabs (outlook lines, calendar, gold journal, reports)
   project_status.py # Status tab + STATUS.md: module imports + pytest, data/key health, backtests, phase gates
   live_feed.py     # Finnhub trades websocket + OANDA pricing stream -> ring buffer, 1s/1m bars in data/live.sqlite
+  intraday.py      # 1m history: OANDA (gold, with spread) / Alpaca (stocks) -> monthly parquet; session resampling
+  strategies.py    # day-trading strategy library on causal Features (signal on close, fixed stop/target)
+  lab_engine.py    # fast simulator: next-open fills, spread/slippage/commission, time exit; random entries
+  lab_stats.py     # stats, day-clustered bootstrap, MC, p vs random, walk-forward, verdict, overfit warnings
+  lab.py           # `python -m forecaster.lab download|run|show` -> data/lab/results.json + OOS trades
+  shadow.py        # paper-trades every lab setup on live bars (same engine); decay vs backtest; no orders
   launcher.py      # supervises monitor + webhook + dashboard (+ cloudflared) for start.bat/start.sh
   auth.py          # dashboard password (PBKDF2, ':'-separated hash) + login lockouts
   model.py         # Forecast contract + block-bootstrap baseline model
   cli.py           # `python -m forecaster`
   sources/         # one adapter per data provider
-app.py             # mobile-first Streamlit app, 7 bottom tabs (reads data/snapshots/*.json only)
+app.py             # mobile-first Streamlit app, 8 bottom tabs (reads data/snapshots/*.json only)
 static/            # PWA manifest + icons (served at /app/static/; regenerate: scripts/make_icons.py)
 start.bat, stop.bat, setup.bat, scripts/windows/   # Windows one-click launcher, shortcuts, auto-start
 start.sh           # same launcher on Linux/macOS
@@ -188,6 +194,21 @@ data/              # API response cache — contents never committed
   by > 0.25σ -> skip (the setup's defining condition failed); slightly wrong side or past 2σ ->
   caution; spot alert price > 0.3% off live -> caution (futures skip that, basis); missing or
   > 10 s old -> unknown. Check data (price, vwap, sd, z) is journaled with the alert.
+- **Strategy Lab** (`strategies.py`, `lab_engine.py`, `lab_stats.py`, `lab.py`), non-negotiable:
+  signals are decided on a bar's close from causal features only and fill at the next open
+  (`test_signals_never_use_future_bars` runs every strategy on truncated data; add new strategies
+  to LIBRARY and that test covers them). Costs always on. Judge only out-of-sample (walk-forward)
+  trades. Random-entry benchmarks and the bootstrap must respect day clustering (`trade_days`,
+  `days=`); without it p-values were too optimistic. `test_luck_test_is_calibrated_on_random_walks`
+  guards calibration. Never tune on OOS results. The verdict rules are the user's: EDGE = p < 0.05,
+  100+ OOS trades, expectancy > 0 after costs. Report Bonferroni alongside. Gold sessions run
+  18:00->17:00 for indicators, but trades are limited to 08:00-16:55 ET (`window_mask`). A day
+  counts as complete if any bar of it reaches the time-exit point (gold's 15m bars end at 16:45/17:00).
+  Stock history: Alpaca (free paper account, SIP -> IEX fallback); Finnhub candles are paid now.
+- **Shadow trading** (`shadow.py`): the same Features/signals/`simulate` as the lab, on cached
+  history + live 1m bars, with `allow_open=True`. Only signals after `started_at` count; closed
+  trades are immutable (upsert only while open). It must never import or call
+  `forecaster.execution` (a test greps for it); the Signal Board has no order buttons.
 - **Launcher** (`launcher.py`): binds everything to 127.0.0.1, restarts crashed services
   with backoff, one instance (data/launcher.pid). The webhook gets `--trust-proxy` only
   when cloudflared runs. Windows scripts must keep CRLF line endings (`.gitattributes`).
@@ -300,6 +321,9 @@ python -m forecaster.launcher --open             # all services without Docker (
 python -m forecaster.launcher --status|--stop|--check
 python -m forecaster.auth --write-env            # set the dashboard password in .env
 python -m forecaster.live_feed --check 30         # connect 30 s, print ticks per symbol (confirms feeds)
+python -m forecaster.lab download --years 3        # 1m history (OANDA gold, Alpaca stocks)
+python -m forecaster.lab run [--synthetic]         # walk-forward lab -> data/lab/results.json
+python -m forecaster.shadow --once                 # one shadow-trading pass (the launcher runs it continuously)
 python -m forecaster.project_status [--quick] [--send]   # STATUS.md: build, data, model, phase, next step
 ```
 

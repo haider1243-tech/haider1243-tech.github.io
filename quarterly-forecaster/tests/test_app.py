@@ -85,7 +85,7 @@ def _go(at, tab):
 
 
 def test_bottom_tabs_and_last_updated_on_every_tab(app):
-    assert app.radio(key="tab").options == ["Week", "Live", "Calendar", "Gold", "Portfolio", "Reports", "Status"]
+    assert app.radio(key="tab").options == ["Week", "Live", "Signals", "Calendar", "Gold", "Portfolio", "Reports", "Status"]
     for tab, title in (("week", "This Week"), ("calendar", "Calendar"), ("gold", "Gold VWAP"),
                        ("portfolio", "Portfolio"), ("reports", "Reports"), ("status", "Status")):
         at = _go(app, tab)
@@ -214,7 +214,7 @@ def test_status_tab(app, monkeypatch):
     at.button(key="recheck").click().run()
     assert not at.exception, at.exception
     txt = _text(at)
-    assert calls and "99 tests passed" in txt and "13/13 modules ✅" in txt
+    assert calls and "99 tests passed" in txt and "19/19 modules ✅" in txt
     assert "Add FINNHUB_API_KEY to .env" in txt or "Add FRED_API_KEY to .env" in txt
     ps.status_json(calls[0]).unlink()
 
@@ -248,3 +248,78 @@ def test_live_tab_tiles_chart_and_tradingview(app, data):
     assert not at.exception
     at.radio(key="live_view").set_value("feed").run()
     lf.live_db(d).unlink()
+
+
+@pytest.fixture
+def lab_app(data, monkeypatch, tmp_path_factory):
+    """App with lab results (one EDGE, one NO EDGE) + a pending shadow setup and a closed shadow trade."""
+    from forecaster import lab as L
+    from forecaster import shadow as SH
+    from forecaster.intraday import INSTRUMENTS, resample, session_bars, synthetic_m1
+    from test_lab import plant_momentum
+
+    d, reports = data
+    spec = INSTRUMENTS["SPY"]
+    m1 = synthetic_m1("SPY", "2022-01-03", "2023-12-29", seed=5)
+    L.run_lab({("SPY", "5m"): resample(session_bars(plant_momentum(m1), spec), 5, spec)}, L.lab_dir(d),
+              strategies=["orb30", "vwap_reversion"], n_random=200, progress=lambda m: None)
+    db = SH.shadow_db(d)
+    SH.init_db(db)
+    now = NOW
+    SH.write(db, [{"key": "orb30|SPY|5m", "signal_time": (now - pd.Timedelta(hours=3)).isoformat(), "strategy": "orb30",
+                   "instrument": "SPY", "timeframe": "5m", "side": 1, "entry_time": (now - pd.Timedelta(hours=3)).isoformat(),
+                   "entry": 600.0, "stop": 598.0, "target": 604.0, "exit_time": now.isoformat(), "exit": 604.0,
+                   "reason": "target", "net_ret": 0.0066, "r_mult": 2.0, "status": "closed", "verdict": "EDGE",
+                   "params": "{}"}],
+             [{"key": "vwap_reversion|SPY|5m", "signal_time": (now - pd.Timedelta(minutes=2)).isoformat(),
+               "strategy": "vwap_reversion", "instrument": "SPY", "timeframe": "5m", "side": -1, "ref": 601.0,
+               "stop": 602.5, "target": 598.0, "verdict": "NO EDGE"},
+              {"key": "orb30|SPY|5m", "signal_time": (now - pd.Timedelta(minutes=1)).isoformat(),
+               "strategy": "orb30", "instrument": "SPY", "timeframe": "5m", "side": 1, "ref": 601.2,
+               "stop": 599.0, "target": 605.6, "verdict": "EDGE"}], [], now)
+    monkeypatch.setenv("FORECASTER_CACHE_DIR", str(d))
+    at = authed_app(APP, default_timeout=60)
+    at.run()
+    yield at
+    import shutil
+    shutil.rmtree(L.lab_dir(d))
+    db.unlink()
+
+
+def test_signal_board_shows_setups_with_stats_and_greys_no_edge(lab_app):
+    at = _go(lab_app, "signals")
+    h = _html(at)
+    assert "Opening range breakout 30m" in h and "VWAP mean reversion" in h
+    assert "LONG" in h and "SHORT" in h and "stop 599.00" in h and "target 605.60" in h and "R:R 2.0" in h
+    assert "Win rate" in h and "Expectancy" in h and "95% CI" in h and "p vs random" in h
+    assert 'qf-setup noedge' in h                                     # NO EDGE card greyed out
+    assert h.index("Opening range breakout 30m") < h.index("VWAP mean reversion")   # EDGE ranked first
+    assert "Recent shadow trades" in _text(at) and "+66.0 bps" in h
+    assert "nothing is ever ordered" in _text(at)
+    assert not [b for b in at.button if "order" in (b.label or "").lower()]          # no order buttons anywhere
+
+
+def test_leaderboard_and_lab_views(lab_app):
+    at = _go(lab_app, "signals")
+    at.radio(key="sig_view").set_value("leaders").run()
+    assert not at.exception, at.exception
+    h = _html(at)
+    assert h.index("Opening range breakout 30m") < h.index("VWAP mean reversion")
+    assert "2 setups tested" in _text(at) and "★" in h and "live +66.0 bps (1)" in h
+    at.selectbox(key="lb_inst").set_value("QQQ").run()
+    assert "No setups for this filter" in _html(at)
+    at.radio(key="sig_view").set_value("lab").run()
+    assert not at.exception, at.exception
+    txt = _text(at)
+    assert "EDGE" in _html(at) and "p &lt; 0.05 vs 1,000 random-entry strategies" in _html(at)
+    assert "walk-forward" in txt and len(at.get("plotly_chart")) >= 3          # random hist, equity, slices
+    for sl in ("weekday", "vix_band", "event_day", "month"):
+        at.selectbox(key="lab_slice").set_value(sl).run()
+        assert not at.exception, (sl, at.exception)
+    at.selectbox(key="lab_pick").set_value("vwap_reversion|SPY|5m").run()
+    assert not at.exception
+
+
+def test_signals_tab_without_results(app):
+    at = _go(app, "signals")
+    assert any("python -m forecaster.lab download" in i.value for i in at.info)

@@ -9,7 +9,7 @@ SERVICES = COMPOSE["services"]
 
 
 def test_services_present_and_restart():
-    assert set(SERVICES) == {"dashboard", "webhook", "monitor", "live", "cloudflared"}
+    assert set(SERVICES) == {"dashboard", "webhook", "monitor", "live", "shadow", "cloudflared"}
     for name, s in SERVICES.items():
         assert s["restart"] == "unless-stopped", name
         assert s["logging"]["options"]["max-size"], name
@@ -20,7 +20,7 @@ def test_services_present_and_restart():
 
 def test_dashboard_bound_to_host_loopback_only():
     assert SERVICES["dashboard"]["ports"] == ["127.0.0.1:8501:8501"]
-    for name in ("webhook", "monitor", "live", "cloudflared"):
+    for name in ("webhook", "monitor", "live", "shadow", "cloudflared"):
         assert "ports" not in SERVICES[name], f"{name} must not publish a host port"
 
 

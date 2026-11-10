@@ -10,6 +10,7 @@ contrast checker in light and dark mode):
 
 from __future__ import annotations
 
+import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 
@@ -319,4 +320,51 @@ def live_gold_chart(df: pd.DataFrame, pal: dict, height: int = 320) -> go.Figure
     fig.update_layout(margin=dict(l=4, r=6, t=6, b=4), dragmode=False, hovermode="x unified")
     fig.update_xaxes(rangeslider_visible=False, nticks=5, tickformat="%H:%M", tickfont=dict(size=11))
     fig.update_yaxes(nticks=5, tickfont=dict(size=11), side="right")
+    return fig
+
+
+def lab_random_hist(edges: list, counts: list, real: float, pal: dict, height: int = 220) -> go.Figure:
+    """Expectancy of 1,000 random-entry strategies (bars) vs the real out-of-sample expectancy (line)."""
+    e = np.asarray(edges) * 1e4
+    mids = (e[:-1] + e[1:]) / 2
+    fig = go.Figure(go.Bar(x=mids, y=counts, marker=dict(color=pal["muted"]), width=(e[1] - e[0]) * 0.92,
+                           hovertemplate="%{x:+.1f} bps: %{y} random strategies<extra></extra>", name="Random entries"))
+    fig.add_vline(x=real * 1e4, line=dict(color=pal["s1"], width=2.5))
+    fig.add_annotation(x=real * 1e4, y=1, yref="paper", text=f"this setup {real * 1e4:+.1f} bps", showarrow=False,
+                       xanchor="left", yanchor="top", xshift=4, font=dict(color=pal["s1"], size=12))
+    _layout(fig, pal, height, legend=False)
+    fig.update_layout(margin=dict(l=4, r=6, t=8, b=4), dragmode=False, bargap=0)
+    fig.update_xaxes(title=dict(text="expectancy per trade after costs (bps)", font=dict(size=11)), tickfont=dict(size=11))
+    fig.update_yaxes(showticklabels=False, showgrid=False)
+    return fig
+
+
+def lab_equity(eq: list, pal: dict, height: int = 200) -> go.Figure:
+    y = np.asarray(eq, float) * 100
+    fig = go.Figure(go.Scatter(y=y, mode="lines", line=dict(color=pal["s1"], width=2),
+                               hovertemplate="%{y:+.2f}%<extra></extra>"))
+    fig.add_hline(y=0, line=dict(color=pal["axis"], width=1))
+    _layout(fig, pal, height, legend=False, y_format="+.1f")
+    fig.update_layout(margin=dict(l=4, r=6, t=8, b=4), dragmode=False)
+    fig.update_xaxes(title=dict(text="out-of-sample trades in order", font=dict(size=11)), tickfont=dict(size=11))
+    fig.update_yaxes(title=dict(text="cumulative %", font=dict(size=11)), tickfont=dict(size=11))
+    return fig
+
+
+def lab_slices(rows: list[dict], pal: dict, height: int | None = None) -> go.Figure:
+    """Expectancy per slice (horizontal bars, one series); the trade count is in the label."""
+    keys = [f"{r['key']} ({r['trades']})" for r in rows]           # trade count next to the label
+    vals = [r["expectancy"] * 1e4 for r in rows]
+    txt = [f"{v:+.1f}" for v in vals]
+    lo, hi = min(min(vals), 0.0), max(max(vals), 0.0)
+    pad = 0.35 * (hi - lo or 1.0)                                    # room for labels on both sides
+    fig = go.Figure(go.Bar(x=vals, y=keys, orientation="h", text=txt, textposition="outside", cliponaxis=False,
+                           marker=dict(color=pal["s1"], cornerradius=3), textfont=dict(color=pal["ink2"], size=11),
+                           hovertemplate="%{y}: %{x:+.1f} bps<extra></extra>"))
+    fig.update_xaxes(range=[lo - (pad if lo < 0 else 0), hi + pad])
+    _layout(fig, pal, height or 40 + 26 * max(len(rows), 1), legend=False)
+    fig.update_layout(margin=dict(l=4, r=8, t=4, b=4), dragmode=False, bargap=0.35)
+    fig.update_yaxes(autorange="reversed", tickfont=dict(size=11), showgrid=False)
+    fig.update_xaxes(zeroline=True, zerolinecolor=pal["axis"], tickfont=dict(size=10), gridcolor=pal["grid"],
+                     title=dict(text="expectancy per trade, bps (trades in brackets)", font=dict(size=11)))
     return fig

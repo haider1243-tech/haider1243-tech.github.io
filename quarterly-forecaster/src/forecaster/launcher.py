@@ -112,6 +112,7 @@ def build_services(root: Path = PROJECT_ROOT, python: str = sys.executable,
     svcs = [
         Service("monitor", [python, "-m", "forecaster.monitor"]),
         Service("live", [python, "-m", "forecaster.live_feed"]),    # Finnhub + OANDA streams, only while running
+        Service("shadow", [python, "-m", "forecaster.shadow"]),     # paper-trades lab setups on live bars; no orders
         Service("webhook", webhook),
         Service("dashboard", [python, "-m", "streamlit", "run", str(root / "app.py"),
                               "--server.address", "127.0.0.1", "--server.port", str(DASHBOARD_PORT),

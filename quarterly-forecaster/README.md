@@ -38,6 +38,14 @@ Bottom tabs:
   account is fine; prices only, no orders). The feeds run only while the app runs (start.bat starts
   them). Check them with `python -m forecaster.live_feed --check 30`: it prints ticks per symbol.
   Finnhub's free websocket streams US stocks; the `.TO` watchlist ETFs may never tick on it.
+- **Signals** (day trading SPY, QQQ, gold; paper only, never places orders):
+  - **Board**: when a strategy triggers on the live feed it shows the instrument, entry/stop/target and
+    that setup's out-of-sample stats (win rate, expectancy, sample, 95% CI, p vs random, verdict).
+    NO EDGE setups are greyed out.
+  - **Leaderboard**: every strategy x instrument x timeframe ranked by out-of-sample expectancy after
+    costs, with live shadow-trading results beside it.
+  - **Lab**: one setup in depth: walk-forward windows, stats, its result vs 1,000 random-entry
+    strategies, equity curve, and slices by time of day, weekday, VIX band and CPI/PPI/FOMC days.
 - **Calendar**: the next 14 days of CPI, PPI, FOMC, jobs, GDP and earnings, colour- and label-coded
   by impact, with live countdowns.
 - **Gold VWAP**: gold vs its session VWAP, the latest TradingView alerts with TAKE / CAUTION / SKIP
@@ -191,6 +199,49 @@ crontab -e
 with "Start in" set to the project folder.
 
 The computer must be on at that time; cron doesn't catch up on missed runs.
+
+## Strategy Lab (day-trading backtests)
+
+```bash
+python -m forecaster.lab download --years 3   # 1-minute history -> data/intraday (cached by month)
+python -m forecaster.lab run                  # 11 strategies x SPY/QQQ/XAU_USD x 5m/15m (~1 min)
+python -m forecaster.lab show                 # leaderboard in the terminal
+python -m forecaster.lab run --synthetic      # offline demo on random-walk data
+```
+
+**Data.** Gold and FX: OANDA practice API (`OANDA_API_TOKEN`), 1-minute mid candles with the real
+bid/ask spread. Stocks: a free **Alpaca paper-only account** (email sign-up, open to Canadians;
+add `ALPACA_API_KEY_ID` / `ALPACA_API_SECRET_KEY`). Its free plan serves historical bars older
+than 15 minutes; if consolidated (SIP) bars are refused it falls back to the IEX feed (fewer prints,
+fine for SPY/QQQ). Finnhub's free tier no longer returns candles (403), so it's only a fallback.
+If Alpaca doesn't work for you, the paid option is Massive (formerly Polygon) Stocks Starter,
+US$29/month (about C$40), with 5 years of minute history. yfinance is used only for daily VIX.
+
+**Strategies** (`strategies.py`, each with fixed entry, stop, target and a time exit, flat before
+the close): VWAP mean reversion, VWAP breakout, opening range breakout 5/15/30 min, EMA 9/21
+cross, RSI(2) reversion, Bollinger squeeze breakout, gap-and-go, gap fade, previous-day
+high/low break. Stocks trade 09:30-16:00 ET; gold 08:00-16:55 ET (its VWAP resets at 18:00).
+
+**Engine** (`lab_engine.py`): signal on a bar's close, fill at the next bar's open; bid/ask from
+the spread; slippage on market and stop orders; commission per share; a stop gapped through fills
+at the open; if a bar hits both stop and target the stop counts (conservative); no entries in the
+first or last minute. It matches backtesting.py trade for trade in the tests.
+
+**Edge vs luck** (`lab_stats.py`): walk-forward (tune on 12 months, trade the next 3 unseen
+months, roll), trade-count/win-rate/expectancy/profit factor/Sharpe/max drawdown/losing streak,
+a day-clustered bootstrap 95% CI, trade-order Monte Carlo for drawdowns, and a p-value against
+1,000 random-entry strategies with the same days, holding times, sides and costs.
+**EDGE** = p < 0.05, 100+ out-of-sample trades and positive expectancy after costs; **WEAK** =
+positive but not all three; otherwise **NO EDGE / LUCK**. With ~60 setups tested, about 3 pass
+p < 0.05 by chance, so a ★ marks the ones that also pass a Bonferroni correction. Overfitting
+warnings appear when many parameters are tuned, the chosen parameters keep changing, or
+in-sample results don't survive out of sample. On random-walk data the p-values were checked to
+be calibrated (p < 0.05 about 5% of the time).
+
+**Shadow trading** (`shadow.py`, starts with start.bat): every setup runs on the live feed with
+its latest walk-forward parameters, using the same engine, and each trade is logged in
+data/shadow.sqlite. The Sunday job compares live results with the backtest and flags DECAY
+(after 20+ live trades) when live falls below the backtest's confidence interval.
 
 ## TradingView webhook → Telegram
 
