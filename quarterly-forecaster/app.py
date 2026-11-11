@@ -29,9 +29,9 @@ from forecaster.config import PROJECT_ROOT, load_settings  # noqa: E402
 
 st.set_page_config(page_title="Forecaster", page_icon="📈", layout="centered", initial_sidebar_state="collapsed")
 
-TABS = {"week": "This Week", "live": "Live", "signals": "Signals", "calendar": "Calendar", "gold": "Gold VWAP", "portfolio": "Portfolio",
+TABS = {"week": "This Week", "live": "Live", "signals": "Signals", "sim": "Simulator", "calendar": "Calendar", "gold": "Gold VWAP", "portfolio": "Portfolio",
         "reports": "Reports", "status": "Status"}
-ICONS = ["📊", "⚡", "🎯", "📅", "🥇", "💼", "📄", "🚦"]
+ICONS = ["📊", "⚡", "🎯", "🕹️", "📅", "🥇", "💼", "📄", "🚦"]
 PAL = viz.PALETTES["dark"]
 STATUS = {"good": "#0ca30c", "warning": "#fab219", "serious": "#ec835a", "critical": "#d03b3b"}
 settings = load_settings()
@@ -116,6 +116,23 @@ h1, h2, h3 { letter-spacing: -0.01em; }
 .qf-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; margin: 6px 0 0; }
 .qf-stats div { background: #232322; border-radius: 8px; padding: 5px 7px; font-size: 0.72rem; color: #898781; }
 .qf-stats b { display: block; color: #f0efec; font-size: 0.88rem; font-weight: 600; }
+
+/* simulator */
+.qf-wl { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 8px; align-items: center;
+  background: #1a1a19; border: 1px solid rgba(255,255,255,0.08); border-radius: 10px; padding: 6px 9px; }
+.qf-wl .sym { font-weight: 600; font-size: 0.86rem; }
+.qf-wl .px { font-family: ui-monospace, Menlo, monospace; font-size: 0.86rem; text-align: right; }
+.qf-wl .sub { color: #898781; font-size: 0.7rem; font-variant-numeric: tabular-nums; }
+.qf-wl.stale { background: #d03b3b; } .qf-wl.stale .sub { color: #fff; }
+.qf-wl.closed, .qf-wl.off { opacity: 0.6; }
+[class*="st-key-pick_"] button, [class*="st-key-setup_"] button { padding: 2px 8px; min-height: 0; font-size: 0.75rem; }
+.st-key-wl [data-testid="stHorizontalBlock"], .st-key-wl_setups [data-testid="stHorizontalBlock"],
+.st-key-fwd [data-testid="stHorizontalBlock"] { flex-wrap: nowrap !important; gap: 6px !important; }
+.st-key-wl [data-testid="stColumn"], .st-key-wl_setups [data-testid="stColumn"],
+.st-key-fwd [data-testid="stColumn"] { min-width: 0 !important; width: auto !important; }
+.st-key-wl [data-testid="stColumn"]:last-child, .st-key-wl_setups [data-testid="stColumn"]:last-child,
+.st-key-fwd [data-testid="stColumn"]:last-child { flex: 0 0 44px !important; }
+.qf-summary { background: #13233a; border: 1px solid #3987e5; border-radius: 12px; padding: 10px 12px; font-size: 0.95rem; }
 
 /* cards, chips, badges */
 .qf-card { background: #1a1a19; border: 1px solid rgba(255,255,255,0.10); border-radius: 14px; padding: 12px 14px; margin: 0 0 10px; }
@@ -233,6 +250,11 @@ def now_utc() -> pd.Timestamp:
     return now()                       # shifted in demo mode, so the simulated market is open
 
 
+def md_money(text: str) -> str:
+    """Escape $ for st.caption / st.markdown: two C$ amounts on one line otherwise render as LaTeX."""
+    return text.replace("$", "\\$")
+
+
 def esc(x) -> str:
     return html.escape(str(x))
 
@@ -325,9 +347,9 @@ def fan_block(t: str, label: str) -> None:
     st.plotly_chart(viz.fan_chart(s, PAL, compact=True), width="stretch",
                     config={"displayModeBar": False, "scrollZoom": False}, key=f"fan_{t}")
     f = s["forecast"][-1]
-    st.caption(f"{f['quarter']}: likely range {viz.money(f['p10'], s, 0)} – {viz.money(f['p90'], s, 0)}, "
-               f"middle {viz.money(f['p50'], s, 0)} (from {viz.money(s['last_close'], s, 0)}). "
-               "Blue band = P10–P90; dashed = P50.")
+    st.caption(md_money(f"{f['quarter']}: likely range {viz.money(f['p10'], s, 0)} – {viz.money(f['p90'], s, 0)}, "
+                        f"middle {viz.money(f['p50'], s, 0)} (from {viz.money(s['last_close'], s, 0)}). "
+                        "Blue band = P10–P90; dashed = P50."))
 
 
 def tab_week() -> None:
@@ -464,8 +486,8 @@ def tab_portfolio() -> None:
         st.plotly_chart(viz.fan_chart(ps, PAL, compact=True), width="stretch",
                         config={"displayModeBar": False}, key="pf_fan")
         f = ps["forecast"][-1]
-        st.caption(f"{f['quarter']}: likely C${f['p10']:,.0f} – C${f['p90']:,.0f}, middle C${f['p50']:,.0f}; "
-                   f"{f.get('prob_loss', 0):.0%} chance of being below today. Joint bootstrap of your holdings' "
+        st.caption(md_money(f"{f['quarter']}: likely C${f['p10']:,.0f} – C${f['p90']:,.0f}, middle C${f['p50']:,.0f}; ")
+                   + f"{f.get('prob_loss', 0):.0%} chance of being below today. Joint bootstrap of your holdings' "
                    "history, buy-and-hold, not backtested.")
     with st.expander("💡 Plan a contribution"):
         planner_block(ps)
@@ -877,6 +899,450 @@ def lab_view(doc: dict) -> None:
         st.caption(s["description"])
 
 
+SIM_HOURS = [f"{h:02d}:{m:02d}" for h in range(0, 24) for m in (0, 30)]
+
+
+def _sim_defaults() -> None:
+    ss = st.session_state
+    ss.setdefault("sim_symbol", "SPY")
+    ss.setdefault("sim_strategy", "orb15")
+    ss.setdefault("sim_tf", "5m")
+    ss.setdefault("sim_range", "1 year")
+
+
+def _pick(symbol: str, strategy: str | None = None, tf: str | None = None) -> None:
+    """Callback: load an instrument (and optionally a strategy + timeframe) into the simulator."""
+    st.session_state["sim_symbol"] = symbol
+    if strategy:
+        st.session_state["sim_strategy"] = strategy
+    if tf:
+        st.session_state["sim_tf"] = tf
+    st.session_state["_sim_rerun"] = True
+
+
+def _apply_scenario(name: str) -> None:
+    from forecaster import simulator as SIM
+
+    cfg = SIM.load_scenarios(settings.cache_dir).get(name)
+    if cfg is None:
+        return
+    ss = st.session_state
+    ss["sim_symbol"], ss["sim_strategy"], ss["sim_tf"] = cfg.symbol, cfg.strategy, cfg.timeframe
+    for k, v in cfg.params.items():
+        ss[f"p_{cfg.strategy}_{k}"] = v
+    ss["sim_range"] = "Custom" if cfg.start or cfg.end else "5 years"
+    if cfg.start:
+        ss["sim_from"] = pd.Timestamp(cfg.start).date()
+    if cfg.end:
+        ss["sim_to"] = pd.Timestamp(cfg.end).date()
+    ss["sim_allday"] = not cfg.hours
+    if cfg.hours:
+        ss["sim_h0"], ss["sim_h1"] = cfg.hours
+    ss["sim_days"] = [["Mon", "Tue", "Wed", "Thu", "Fri"][d] for d in cfg.weekdays]
+    ss["sim_skip_ev"] = cfg.skip_events
+    ss["sim_bal"], ss["sim_size_mode"] = cfg.balance_cad, cfg.sizing.mode
+    ss[f"sim_size_val_{cfg.sizing.mode}"] = cfg.sizing.value
+    ss[f"sim_mtd_{cfg.strategy}"], ss["sim_mdl"] = cfg.max_trades_per_day, cfg.max_daily_loss_cad or 0.0
+    ss["sim_stop_pct"], ss["sim_tgt_pct"], ss["sim_hold"] = cfg.stop_pct or 0.0, cfg.target_pct or 0.0, cfg.max_hold_bars or 0
+    if cfg.costs:
+        for k, v in vars(cfg.costs).items():
+            ss[f"c_{cfg.symbol}_{k}"] = v
+
+
+def tab_sim() -> None:
+    header("Simulator")
+    st.caption("Test any strategy on any instrument and period with your own money settings. Separate from the "
+               "forecaster. Paper only: nothing here can place an order.")
+    _sim_defaults()
+    # this tab uses the full width on desktops (two panels side by side); phones still stack them
+    st.html("<style>@media (min-width: 900px) { .block-container, [data-testid='stMainBlockContainer'] "
+            "{ max-width: 1320px !important; } }</style>")
+    left, right = st.columns([2, 3], gap="medium")
+    with left:
+        sim_live_panel()
+    with right:
+        cfg = sim_inputs()
+    sim_results(cfg)
+
+
+def sim_live_panel() -> None:
+    from forecaster import lab as L
+    from forecaster import live_feed as lf
+    from forecaster import shadow as SH
+    from forecaster import simulator as SIM
+    from forecaster.config import load_watchlist
+    from forecaster.intraday import spec_for
+
+    symbols = list(SIM.SIM_SYMBOLS) + [s for s in load_watchlist(PROJECT_ROOT / "watchlist.yaml") if s not in SIM.SIM_SYMBOLS]
+    db = lf.live_db(settings.cache_dir)
+
+    @st.fragment(run_every="2s")
+    def panel() -> None:
+        if st.session_state.pop("_sim_rerun", False):
+            st.rerun()
+        now = now_utc()
+        st.markdown("**Live market**")
+        wl = st.container(key="wl")
+        for r in lf.watchlist_rows(db, now, symbols):
+            dec = 4 if r["symbol"] == "USD_CAD" else 2
+            px = "—" if r["price"] is None else f"{r['price']:,.{dec}f}"
+            chg = "" if r["change"] is None else f"{r['change']:+.2%}"
+            vw = "" if r["vwap_pct"] is None else (f"VWAP {r['vwap_pct']:+.2%}" + ("" if r["vwap_z"] is None
+                                                                                  else f" ({r['vwap_z']:+.1f}σ)"))
+            spark = viz.sparkline_svg(r["spark"], PAL["s1"], PAL["s2"])
+            tick = _ms_time(r["ts_ms"]) if r["ts_ms"] else r["note"]
+            c1, c2 = wl.columns([6, 1], vertical_alignment="center")
+            c1.html(f'<div class="qf-wl {r["state"]}"><div><span class="sym">{esc(r["label"])}</span> '
+                    f'<span class="sub">{esc(chg)} · {esc(vw)}</span></div><div class="px">{px}</div>'
+                    f'<div class="sub">{esc(tick)}</div><div>{spark}</div></div>')
+            c2.button("▶", key=f"pick_{r['symbol']}", help=f"Load {r['label']} into the simulator",
+                      on_click=_pick, args=(r["symbol"],), disabled=spec_for(r["symbol"]) is None)
+        st.markdown("**Live setups right now**")
+        doc = _lab_doc() or {"setups": []}
+        verdicts = {s["key"]: s["verdict"] for s in doc["setups"]}
+        verdicts.update({f["key"]: f["verdict"] for f in SIM.forward_tests(settings.cache_dir)})
+        pend = SH.read_pending(SH.shadow_db(settings.cache_dir), pd.Timedelta(minutes=20), now)
+        opened = SH.read_trades(SH.shadow_db(settings.cache_dir), "open")
+        items = [(p["strategy"], p["instrument"], p["timeframe"], p["side"], "setup", p["key"]) for p in pend]
+        items += [(t.strategy, t.instrument, t.timeframe, t.side, "open paper trade", t.key)
+                  for t in (opened.itertuples() if len(opened) else [])]
+        if not items:
+            st.caption("Nothing triggering right now. Strategies check every bar close (shadow trading must be running).")
+        setups = st.container(key="wl_setups")
+        for n, (strat, sym, tf, side, what, key) in enumerate(items[:12]):
+            v = verdicts.get(key, "NO EDGE")
+            c1, c2 = setups.columns([6, 1], vertical_alignment="center")
+            c1.html(f'<div class="qf-wl{" closed" if v == "NO EDGE" else ""}"><div><span class="sym">'
+                    f'{esc(S_NAME(strat))}</span><div class="sub">{esc(sym)} · {esc(tf)} · '
+                    f'{"LONG" if side > 0 else "SHORT"} · {esc(what)}</div></div><div>{_verdict_badge(v)}</div></div>')
+            c2.button("▶", key=f"setup_{n}_{key}", help="Load this strategy + instrument",
+                      on_click=_pick, args=(sym, strat, tf))
+
+    panel()
+
+
+def S_NAME(key: str) -> str:
+    from forecaster.strategies import LIBRARY
+
+    return LIBRARY[key].name if key in LIBRARY else key
+
+
+def _w(fn, label, key, default, **kw):
+    """Widget whose default lives in session state (so callbacks can set it without warnings)."""
+    st.session_state.setdefault(key, default)
+    return fn(label, key=key, **kw)
+
+
+def _param_widget(strategy: str, name: str, default):
+    key = f"p_{strategy}_{name}"
+    label = name.replace("_", " ")
+    if name == "sides":
+        return _w(st.selectbox, "Sides", key, default, options=["both", "long", "short"])
+    if name == "stop":
+        return _w(st.selectbox, "Stop at", key, default, options=["range", "mid"])
+    if name == "mode":
+        st.caption(f"Mode: {default}")
+        return default
+    if isinstance(default, int) and not isinstance(default, bool):
+        return int(_w(st.number_input, label, key, int(default), step=1))
+    return float(_w(st.number_input, label, key, float(default), step=0.0005 if abs(default) < 0.05 else 0.1,
+                    format="%.4f" if abs(default) < 0.05 else "%.2f"))
+
+
+def sim_inputs():
+    from forecaster import simulator as SIM
+    from forecaster.intraday import spec_for
+    from forecaster.strategies import LIBRARY, applicable
+
+    ss = st.session_state
+    st.markdown("**Simulator**")
+    scen = SIM.load_scenarios(settings.cache_dir)
+    if scen:
+        c1, c2 = st.columns([3, 1], vertical_alignment="bottom")
+        pick = c1.selectbox("Saved scenarios", list(scen), key="sim_scen")
+        c2.button("Load", key="sim_scen_load", on_click=_apply_scenario, args=(pick,), width="stretch")
+    syms = list(SIM.SIM_SYMBOLS) + [s for s in [ss.get("sim_symbol")] if s and s not in SIM.SIM_SYMBOLS and spec_for(s)]
+    c1, c2 = st.columns(2)
+    sym = c1.selectbox("Instrument", syms, key="sim_symbol")
+    strat = c2.selectbox("Strategy", list(LIBRARY), key="sim_strategy", format_func=lambda k: LIBRARY[k].name)
+    tf = st.radio("Bar size", list(SIM.TIMEFRAMES), horizontal=True, key="sim_tf",
+                  format_func=lambda x: "daily" if x == "1d" else x)
+    st_obj = LIBRARY[strat]
+    minutes = SIM.TIMEFRAMES[tf] or 390
+    if not applicable(st_obj, minutes):
+        st.warning(f"{st_obj.name} needs bars of {st_obj.max_minutes} minutes or less; pick a smaller bar size.",
+                   icon="⚠️")
+    with st.expander("Strategy parameters", expanded=False):
+        st.caption((st_obj.description or "").strip().split("\n")[0])
+        params = {k: _param_widget(strat, k, v) for k, v in st_obj.params.items() if k != "max_trades"}
+    rng = st.radio("Period", list(SIM.RANGES) + ["Custom"], horizontal=True, key="sim_range")
+    today = now_utc().tz_convert(ad.NY).date()
+    if rng == "Custom":
+        c1, c2 = st.columns(2)
+        with c1:
+            d0 = _w(st.date_input, "From", "sim_from", today - pd.Timedelta(days=365))
+        with c2:
+            d1 = _w(st.date_input, "To", "sim_to", today)
+        start, end = str(d0), str(d1)
+    else:
+        start, end = str(today - pd.Timedelta(days=SIM.RANGES[rng])), str(today)
+    with st.expander("Filters: hours, days, events"):
+        allday = _w(st.checkbox, "All day (whole trading window)", "sim_allday", True)
+        hours = None
+        if not allday:
+            c1, c2 = st.columns(2)
+            with c1:
+                h0 = _w(st.selectbox, "Enter from (New York)", "sim_h0", "09:30", options=SIM_HOURS)
+            with c2:
+                h1 = _w(st.selectbox, "until", "sim_h1", "11:30", options=SIM_HOURS)
+            hours = (h0, h1)
+        days = _w(st.multiselect, "Days", "sim_days", ["Mon", "Tue", "Wed", "Thu", "Fri"],
+                  options=["Mon", "Tue", "Wed", "Thu", "Fri"])
+        skip = _w(st.checkbox, "Skip CPI / PPI / FOMC days", "sim_skip_ev", False)
+        if skip and not settings.fred_api_key:
+            st.caption("Needs FRED_API_KEY for historical release dates; without it no days are skipped.")
+    with st.expander("Money (CAD)"):
+        c1, c2 = st.columns(2)
+        with c1:
+            bal = _w(st.number_input, "Starting balance (C$)", "sim_bal", 10_000.0, min_value=100.0, step=1000.0)
+        with c2:
+            mode = _w(st.selectbox, "Position size", "sim_size_mode", "risk_pct",
+                      options=["risk_pct", "fixed_cash", "fixed_units"],
+                      format_func={"risk_pct": "% of equity risked to the stop",
+                                   "fixed_cash": "Fixed C$ per trade", "fixed_units": "Fixed shares / units"}.get)
+        val = _w(st.number_input, {"risk_pct": "Risk per trade (%)", "fixed_cash": "C$ per trade",
+                                   "fixed_units": "Shares / units"}[mode], f"sim_size_val_{mode}",
+                 {"risk_pct": 1.0, "fixed_cash": 5000.0, "fixed_units": 10.0}[mode], min_value=0.0,
+                 step={"risk_pct": 0.25, "fixed_cash": 500.0, "fixed_units": 1.0}[mode])
+        c1, c2 = st.columns(2)
+        with c1:
+            mtd = _w(st.number_input, "Max trades per day", f"sim_mtd_{strat}", int(st_obj.params.get("max_trades", 3)),
+                     min_value=1, step=1)
+        with c2:
+            mdl = _w(st.number_input, "Max daily loss (C$, 0 = off)", "sim_mdl", 0.0, min_value=0.0, step=50.0)
+        st.caption("Positions never exceed your equity (no leverage). Shares are whole numbers.")
+    d = SIM.default_costs(sym)
+    with st.expander("Costs (pre-filled for this instrument)"):
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            cpo = _w(st.number_input, "Commission / order", f"c_{sym}_commission_per_order", d.commission_per_order,
+                     min_value=0.0, step=0.5)
+        with c2:
+            cpu = _w(st.number_input, "+ per share/unit", f"c_{sym}_commission_per_unit", d.commission_per_unit,
+                     min_value=0.0, step=0.001, format="%.4f")
+        with c3:
+            cmin = _w(st.number_input, "Minimum / order", f"c_{sym}_min_commission", d.min_commission,
+                      min_value=0.0, step=0.5)
+        c1, c2 = st.columns(2)
+        with c1:
+            spr = _w(st.number_input, "Spread (price units)", f"c_{sym}_spread", d.spread, min_value=0.0,
+                     step=d.spread / 2 or 0.01, format="%.5f")
+        with c2:
+            slp = _w(st.number_input, "Slippage (price units)", f"c_{sym}_slippage", d.slippage, min_value=0.0,
+                     step=d.slippage / 2 or 0.01, format="%.5f")
+        st.caption("Commission in the instrument's currency (USD for US stocks and gold). Defaults: IBKR-style "
+                   "US$0.005/share with a US$1 minimum; OANDA has no commission, cost is in the spread.")
+    with st.expander("Stop / target / time exit overrides"):
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            sp = _w(st.number_input, "Stop % (0 = strategy's)", "sim_stop_pct", 0.0, min_value=0.0, step=0.1)
+        with c2:
+            tp = _w(st.number_input, "Target % (0 = strategy's)", "sim_tgt_pct", 0.0, min_value=0.0, step=0.1)
+        with c3:
+            hold = _w(st.number_input, "Exit after N bars (0 = off)", "sim_hold", 0, min_value=0, step=1)
+        st.caption("Every trade is flat before the close of its day regardless.")
+    cfg = SIM.SimConfig(symbol=sym, strategy=strat, params=params, timeframe=tf, start=start, end=end, hours=hours,
+                        weekdays=tuple(["Mon", "Tue", "Wed", "Thu", "Fri"].index(x) for x in days), skip_events=skip,
+                        balance_cad=float(bal), sizing=SIM.Sizing(mode, float(val)), max_trades_per_day=int(mtd),
+                        max_daily_loss_cad=float(mdl) or None,
+                        costs=SIM.Costs(cpo, cpu, cmin, spr, slp), stop_pct=sp or None, target_pct=tp or None,
+                        max_hold_bars=int(hold) or None)
+    compare_on = st.toggle("Compare mode (up to 4 strategies, same instrument and period)", key="sim_cmp")
+    others = []
+    if compare_on:
+        others = st.multiselect("Compare with", [k for k in LIBRARY if k != strat], max_selections=3,
+                                key="sim_cmp_list", format_func=lambda k: LIBRARY[k].name)
+    c1, c2, c3 = st.columns(3)
+    if c1.button("▶ Run", type="primary", width="stretch", key="sim_run"):
+        _run_sim(cfg, others if compare_on else [])
+    if c2.button("Save scenario", width="stretch", key="sim_save"):
+        name = SIM.save_scenario(settings.cache_dir, cfg)
+        st.toast(f"Saved: {name}")
+    res = ss.get("sim_result")
+    fwd_ok = res is not None and cfg.timeframe != "1d"
+    if c3.button("Forward test this", width="stretch", key="sim_fwd", disabled=not fwd_ok,
+                 help="Adds this scenario to shadow trading on the live feed (paper only)"):
+        key = SIM.add_forward_test(settings.cache_dir, cfg, res[0] if res else None)
+        st.toast("Added to shadow trading. Live results appear below as setups trigger.")
+    return cfg
+
+
+@st.cache_data(show_spinner=False, ttl=6 * 3600)
+def _sim_events(start: str, end: str):
+    from forecaster import lab as L
+
+    try:
+        return L.load_event_days(settings, pd.Timestamp(start), pd.Timestamp(end))
+    except Exception:
+        return None
+
+
+def _sim_fx():
+    from forecaster import live_feed as lf
+    from forecaster import simulator as SIM
+
+    fx = SIM.load_fx(settings.cache_dir)
+    if fx is not None:
+        return fx, "daily USD/CAD from the forecaster's cache"
+    live = lf.read_latest(lf.live_db(settings.cache_dir)).get("USD_CAD")
+    if live and live.get("price"):
+        return float(live["price"]), f"live USD/CAD {live['price']:.4f} for every trade (no daily history cached)"
+    return 1.37, "USD/CAD 1.37 assumed (no rate cached yet)"
+
+
+def _run_sim(cfg, others: list[str]) -> None:
+    from forecaster import intraday as I
+    from forecaster import simulator as SIM
+
+    store = I.IntradayStore(settings.cache_dir / "intraday")
+    fx, fx_note = _sim_fx()
+    events = _sim_events(cfg.start or "2000-01-01", cfg.end or str(now_utc().date())) if cfg.skip_events else None
+    with st.spinner("Simulating (incl. 1,000 random-entry runs)..."):
+        try:
+            bars, minutes, spec = SIM.load_bars(store, cfg)
+        except ValueError as exc:
+            st.error(str(exc), icon="⛔")
+            return
+        if bars.empty:
+            st.session_state["sim_result"] = None
+            st.error(f"No cached {cfg.symbol} data for this period. Run `python -m forecaster.lab download` "
+                     "(or try demo mode).", icon="⛔")
+            return
+        res, log = SIM.run(cfg, bars, minutes, spec, fx, events)
+        res["fx_note"] = fx_note
+        st.session_state["sim_result"] = (res, log, bars)
+        cmp = []
+        for k in others:
+            from forecaster.strategies import LIBRARY
+
+            c2 = SIM.SimConfig.from_dict({**cfg.to_dict(), "strategy": k, "params": dict(LIBRARY[k].params)})
+            r2, _ = SIM.run(c2, bars, minutes, spec, fx, events)
+            cmp.append(r2)
+        st.session_state["sim_compare"] = cmp
+
+
+def sim_results(cfg) -> None:
+    from forecaster import shadow as SH
+    from forecaster import simulator as SIM
+    from forecaster.strategies import LIBRARY
+
+    got = st.session_state.get("sim_result")
+    if got:
+        res, log, bars = got
+        h, e = res["headline"], res["edge"]
+        c = res["config"]
+        st.markdown(f"### {esc(LIBRARY[c['strategy']].name)} · {esc(c['symbol'])} · {esc(c['timeframe'])}")
+        st.html(f'<div class="qf-summary">{esc(res["summary"])}</div>')
+        cells = [("Trades", str(h["trades"])), ("Win rate", _pct(h["win_rate"])),
+                 ("Total P&L", f"C${h['pnl_cad']:+,.0f} ({h['pnl_pct']:+.1%})"),
+                 ("Expectancy / trade", "n/a" if h["expectancy_cad"] is None else
+                  f"C${h['expectancy_cad']:+,.2f} ({_bps(h['expectancy_ret'])})"),
+                 ("Profit factor", "n/a" if h["profit_factor"] is None else f"{h['profit_factor']:.2f}"),
+                 ("Max drawdown", f"C${h['max_dd_cad']:,.0f} ({h['max_dd_pct']:.1%})"),
+                 ("Avg hold", "n/a" if h["avg_hold_min"] is None else
+                  (f"{h['avg_hold_min']:.0f} min" if h["avg_hold_min"] < 600 else f"{h['avg_hold_min'] / 1440:.1f} days")),
+                 ("Losing streak", str(h["losing_streak"])), ("Final equity", f"C${h['final_equity']:,.0f}")]
+        st.html('<div class="qf-stats" style="margin:8px 0">' + "".join(
+            f"<div>{esc(a)}<b>{esc(b)}</b></div>" for a, b in cells) + "</div>")
+        sk = {k: v for k, v in h["skipped"].items() if v}
+        if sk:
+            st.caption("Signals not taken: " + ", ".join(f"{v} ({k})" for k, v in sk.items()) + ".")
+        st.html(f'<div class="qf-card"><div style="display:flex;justify-content:space-between;align-items:center">'
+                f'<b>Edge vs luck</b>{_verdict_badge(e["verdict"])}</div><div class="qf-stats">'
+                f'<div style="grid-column:span 2">95% range of expectancy<b>{esc(_ci(e["ci"]))}</b></div>'
+                f'<div>p vs {e["n_random"]:,} random<b>{_pval(e["p_value"])}</b></div></div>'
+                f'<div class="qf-muted" style="margin-top:6px">{"<br>".join(esc(w) for w in e["why"])}<br>'
+                "In-sample: you chose these settings on this same period, so treat EDGE as a hypothesis. "
+                "Forward test it on the live feed before trusting it. EDGE needs 100+ trades.</div></div>")
+        st.caption(f"Money converted at {res.get('fx_note', 'USD/CAD')}. Costs: commission per order "
+                   f"{res['costs']['commission_per_order']:g} + {res['costs']['commission_per_unit']:g}/unit "
+                   f"(min {res['costs']['min_commission']:g}), spread {res['costs']['spread']:g}, "
+                   f"slippage {res['costs']['slippage']:g}.")
+        if h["trades"]:
+            st.markdown("**Equity** vs buy & hold, drawdown below")
+            st.plotly_chart(viz.sim_equity(res, PAL), width="stretch", config={"displayModeBar": False}, key="sim_eq")
+            if res["mc"]:
+                st.markdown("**Monte Carlo: 1,000 reshuffles of the trade order**")
+                st.plotly_chart(viz.sim_mc(res["mc"], PAL), width="stretch", config={"displayModeBar": False},
+                                key="sim_mc")
+                st.caption(md_money(f"Same trades, different order: the median worst drawdown is "
+                                    f"C${res['mc']['dd_median']:,.0f}; with 1-in-20 bad luck it's "
+                                    f"C${res['mc']['dd_p95']:,.0f}."))
+            st.markdown("**Trades on the chart** (latest 150)")
+            st.plotly_chart(viz.sim_trades_chart(bars, log, PAL), width="stretch",
+                            config={"displayModeBar": False, "scrollZoom": True}, key="sim_px")
+            t1, t2, t3 = st.tabs(["By month", "By weekday", "By hour (NY)"])
+            for tab_, rows in ((t1, res["by_month"]), (t2, res["by_weekday"]), (t3, res["by_hour"])):
+                with tab_:
+                    st.dataframe(pd.DataFrame([{"": r["key"], "Trades": r["trades"], "Win rate": r["win_rate"],
+                                                "P&L (C$)": r["pnl_cad"], "Avg (C$)": r["avg_cad"]} for r in rows]),
+                                 hide_index=True, width="stretch", column_config={
+                                     "Win rate": st.column_config.NumberColumn(format="percent"),
+                                     "P&L (C$)": st.column_config.NumberColumn(format="%+.0f"),
+                                     "Avg (C$)": st.column_config.NumberColumn(format="%+.2f")})
+            st.markdown("**Trade log**")
+            show = log.copy()
+            for col_ in ("entry_time", "exit_time"):
+                show[col_] = pd.to_datetime(show[col_]).dt.tz_convert(ad.NY).dt.strftime("%Y-%m-%d %H:%M")
+            st.dataframe(show[["entry_time", "exit_time", "side", "units", "entry", "exit", "reason", "commission",
+                               "pnl_cad"]].iloc[::-1], hide_index=True, width="stretch", height=280,
+                         column_config={"side": st.column_config.NumberColumn("side", format="%+d"),
+                                        "entry": st.column_config.NumberColumn(format="%.4f"),
+                                        "exit": st.column_config.NumberColumn(format="%.4f"),
+                                        "commission": st.column_config.NumberColumn(format="%.2f"),
+                                        "pnl_cad": st.column_config.NumberColumn("P&L (C$)", format="%+.2f")})
+            st.download_button("Download trade log (CSV)", SIM.trade_log_csv(log), file_name="simulator_trades.csv",
+                               mime="text/csv", key="sim_csv")
+        cmp = st.session_state.get("sim_compare") or []
+        if cmp:
+            st.markdown("**Compare**")
+            allr = [res, *cmp]
+            names = [LIBRARY[r["config"]["strategy"]].name for r in allr]
+            st.dataframe(pd.DataFrame([{
+                "Strategy": n, "Trades": r["headline"]["trades"], "Win rate": r["headline"]["win_rate"],
+                "P&L (C$)": r["headline"]["pnl_cad"], "Expectancy (bps)": (r["headline"]["expectancy_ret"] or 0) * 1e4,
+                "Profit factor": r["headline"]["profit_factor"], "Max DD (C$)": r["headline"]["max_dd_cad"],
+                "p vs random": r["edge"]["p_value"], "Verdict": r["edge"]["verdict"]} for n, r in zip(names, allr)]),
+                hide_index=True, width="stretch", column_config={
+                    "Win rate": st.column_config.NumberColumn(format="percent"),
+                    "P&L (C$)": st.column_config.NumberColumn(format="%+.0f"),
+                    "Expectancy (bps)": st.column_config.NumberColumn(format="%+.1f"),
+                    "Profit factor": st.column_config.NumberColumn(format="%.2f"),
+                    "Max DD (C$)": st.column_config.NumberColumn(format="%.0f"),
+                    "p vs random": st.column_config.NumberColumn(format="%.3f")})
+            st.plotly_chart(viz.sim_compare_equity(allr, names, PAL), width="stretch",
+                            config={"displayModeBar": False}, key="sim_cmp_eq")
+    else:
+        st.info("Pick an instrument (or tap ▶ on a live row), a strategy and a period, then press Run.", icon="🕹️")
+    fwd = SIM.forward_tests(settings.cache_dir)
+    if fwd:
+        st.markdown("**Forward tests (shadow trading on the live feed)**")
+        live = SH.read_trades(SH.shadow_db(settings.cache_dir))
+        fbox = st.container(key="fwd")
+        for f in fwd:
+            lt = live[live["key"] == f["key"]] if len(live) else live
+            closed = lt[lt["status"] == "closed"]["net_ret"].dropna() if len(lt) else pd.Series(dtype=float)
+            bt = f.get("backtest_expectancy")
+            line = (f"live {_bps(closed.mean())} over {len(closed)} trades" if len(closed) else "no live trades yet") + \
+                   f" · backtest {_bps(bt) if bt is not None else 'n/a'}" + \
+                   (f" · {int((lt['status'] == 'open').sum())} open" if len(lt) else "")
+            c1, c2 = fbox.columns([6, 1], vertical_alignment="center")
+            c1.html(f'<div class="qf-wl"><div><span class="sym">{esc(f["name"])}</span>'
+                    f'<div class="sub">{esc(line)}</div></div><div>{_verdict_badge(f["verdict"])}</div></div>')
+            c2.button("✕", key=f"fwd_rm_{f['key']}", help="Stop this forward test",
+                      on_click=SIM.remove_forward_test, args=(settings.cache_dir, f["key"]))
+
+
 STATE_COLOR = {"built": "good", "failing": "warning", "missing": "critical", "unchecked": "serious"}
 
 
@@ -968,11 +1434,12 @@ if "tab" not in st.session_state:
     st.session_state["tab"] = qp if qp in TABS else "week"
 with st.container(key="bottomnav"):
     tab = st.radio("Navigation", keys, key="tab", horizontal=True, label_visibility="collapsed",
-                   format_func=lambda k: TABS[k].replace("This Week", "Week").replace("Gold VWAP", "Gold"))
+                   format_func=lambda k: TABS[k].replace("This Week", "Week").replace("Gold VWAP", "Gold")
+                   .replace("Simulator", "Sim"))
 if st.query_params.get("tab") != tab:
     st.query_params["tab"] = tab
 
 {"week": tab_week, "calendar": tab_calendar, "gold": tab_gold, "portfolio": tab_portfolio,
- "reports": tab_reports, "status": tab_status, "live": tab_live, "signals": tab_signals}[tab]()
+ "reports": tab_reports, "status": tab_status, "live": tab_live, "signals": tab_signals, "sim": tab_sim}[tab]()
 if tab not in ("portfolio",):
     settings_footer()

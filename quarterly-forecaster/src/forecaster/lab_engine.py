@@ -106,10 +106,12 @@ def prepare(bars: pd.DataFrame, spec: InstrumentSpec, minutes: int, costs: CostM
 
 
 def simulate(pp: Prepared, signals: pd.DataFrame, costs: CostModel, max_trades: int = 99,
-             allow_open: bool = False) -> pd.DataFrame:
+             allow_open: bool = False, max_hold: int | None = None, cross_day: bool = False) -> pd.DataFrame:
     """Signals (index = bar i, columns side, stop, target) -> trades DataFrame (TRADE_COLS).
     Days whose window isn't complete in the data are skipped, unless `allow_open` (live shadow
-    trading), where a trade with no exit yet stays open."""
+    trading), where a trade with no exit yet stays open. `max_hold` (bars, incl. the entry bar)
+    adds an earlier time exit. `cross_day` lets a signal fill on the next trading day (daily bars:
+    decide at today's close, enter at tomorrow's open, out by tomorrow's close)."""
     rows = []
     n = len(pp.o)
     busy_until = -1
@@ -118,7 +120,7 @@ def simulate(pp: Prepared, signals: pd.DataFrame, costs: CostModel, max_trades: 
     for i, side, stop, target in zip(signals.index.to_numpy(), signals["side"].to_numpy(),
                                      signals["stop"].to_numpy(float), signals["target"].to_numpy(float)):
         j = i + 1
-        if j >= n or j <= busy_until or pp.day[j] != pp.day[i] or not pp.entry_ok[j]:
+        if j >= n or j <= busy_until or (pp.day[j] != pp.day[i] and not cross_day) or not pp.entry_ok[j]:
             continue
         complete = bool(pp.complete_day[j])
         if not complete and not allow_open:
@@ -131,7 +133,10 @@ def simulate(pp: Prepared, signals: pd.DataFrame, costs: CostModel, max_trades: 
             continue                                          # gapped past the stop/target: no trade
         per_day[pp.day[j]] = per_day.get(pp.day[j], 0) + 1
         last = int(pp.last_exit[j])
-        end = last if complete else n - 1
+        timed = complete
+        if max_hold is not None and max_hold >= 1 and j + max_hold - 1 < (last if complete else n):
+            last, timed = j + max_hold - 1, True                  # earlier time exit inside the day
+        end = last if timed else n - 1
         k = slice(j, end + 1)
         hs, o, hh, ll = pp.hs[k], pp.o[k], pp.h[k], pp.lo[k]
         if side > 0:
@@ -152,7 +157,7 @@ def simulate(pp: Prepared, signals: pd.DataFrame, costs: CostModel, max_trades: 
                 reason = "target"
                 exit_ = target if open_px is None else (max(target, open_px) if side > 0 else min(target, open_px))
                 exit_ref = exit_ + side * hs[m]
-        elif complete:
+        elif timed:
             b, reason = last, "time"
             exit_ref = pp.c[b]
             exit_ = exit_ref - side * (pp.hs[b] + pp.slip[b])

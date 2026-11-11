@@ -34,12 +34,14 @@ from forecaster.clock import now_ms as market_now_ms
 
 log = logging.getLogger("simfeed")
 FINNHUB_PORT, OANDA_PORT = 18765, 18766
-DAILY_VOL = {"SPY": 0.011, "QQQ": 0.014, "NVDA": 0.026, "AAPL": 0.015, "MSFT": 0.013, "XAU_USD": 0.010,
+DAILY_VOL = {"SPY": 0.011, "QQQ": 0.014, "NVDA": 0.026, "AAPL": 0.015, "MSFT": 0.013, "TSLA": 0.035, "XAU_USD": 0.010,
              "USD_CAD": 0.004, "EUR_USD": 0.005, "USD_JPY": 0.006, "GBP_USD": 0.005, "USD_SEK": 0.006,
              "USD_CHF": 0.005}
-START = {"SPY": 600.0, "QQQ": 520.0, "NVDA": 190.0, "AAPL": 230.0, "MSFT": 510.0, "XAU_USD": 2650.0,
+START = {"SPY": 600.0, "QQQ": 520.0, "NVDA": 190.0, "AAPL": 230.0, "MSFT": 510.0, "TSLA": 420.0, "XAU_USD": 2650.0,
          "USD_CAD": 1.38, "EUR_USD": 1.08, "USD_JPY": 150.0, "GBP_USD": 1.27, "USD_SEK": 10.5, "USD_CHF": 0.88}
 TICKS_PER_SEC = 4
+SIM_SYMBOLS = ("SPY", "QQQ", "NVDA", "AAPL", "MSFT", "TSLA", "XAU_USD", "USD_CAD")
+HISTORY_DAYS = 730          # demo history for the Simulator tab (2 years of 1-minute bars)
 
 
 def demo_market_start(real_now: pd.Timestamp | None = None) -> pd.Timestamp:
@@ -62,7 +64,7 @@ class Market:
 
     def step(self, sym: str, dt_s: float) -> float:
         t = market_now().tz_convert(I.NY)
-        act = _activity(t.hour * 60 + t.minute) if sym in ("SPY", "QQQ", "NVDA", "AAPL", "MSFT") else 1.0
+        act = _activity(t.hour * 60 + t.minute) if sym in ("SPY", "QQQ", "NVDA", "AAPL", "MSFT", "TSLA") else 1.0
         sigma = DAILY_VOL.get(sym, 0.01) * act / math.sqrt(390 * 60)
         self.p[sym] *= math.exp(sigma * math.sqrt(dt_s) * self.rng.gauss(0, 1))
         return self.p[sym]
@@ -161,7 +163,8 @@ def _scaled(m1: pd.DataFrame, target_last: float) -> pd.DataFrame:
     return out
 
 
-def seed(cache_dir: Path, mnow: pd.Timestamp, run_lab: bool = True, progress=print) -> dict[str, float]:
+def seed(cache_dir: Path, mnow: pd.Timestamp, run_lab: bool = True, progress=print,
+         symbols=SIM_SYMBOLS, history_days: int = HISTORY_DAYS) -> dict[str, float]:
     """History up to `mnow` (market time) for SPY/QQQ/XAU_USD, previous closes, lab results.
     Returns the last prices the simulator continues from."""
     from forecaster import lab as L
@@ -171,9 +174,9 @@ def seed(cache_dir: Path, mnow: pd.Timestamp, run_lab: bool = True, progress=pri
     store = I.IntradayStore(cache_dir / "intraday")
     rng = np.random.default_rng(int(mnow.timestamp()) // 86400)
     last, prev = {}, {}
-    start = (mnow - pd.Timedelta(days=16)).tz_convert(I.NY).strftime("%Y-%m-%d")
+    start = (mnow - pd.Timedelta(days=history_days)).tz_convert(I.NY).strftime("%Y-%m-%d")
     end = mnow.tz_convert(I.NY).strftime("%Y-%m-%d")
-    for n, sym in enumerate(("SPY", "QQQ", "XAU_USD")):
+    for n, sym in enumerate(symbols):
         spec = I.INSTRUMENTS[sym]
         m1 = I.synthetic_m1(sym, start, end, seed=int(rng.integers(1e9)) + n)
         m1 = m1[m1.index < mnow]
@@ -200,7 +203,8 @@ def seed(cache_dir: Path, mnow: pd.Timestamp, run_lab: bool = True, progress=pri
     return last
 
 
-def prepare_demo(cache_dir: Path, mnow: pd.Timestamp, run_lab: bool = True, progress=print) -> dict[str, float]:
+def prepare_demo(cache_dir: Path, mnow: pd.Timestamp, run_lab: bool = True, progress=print,
+                 symbols=SIM_SYMBOLS, history_days: int = HISTORY_DAYS) -> dict[str, float]:
     """Fresh simulated day: wipe the previous demo's live/shadow/intraday data (the demo clock
     restarts at 09:44, so old bars would overlap), keep the lab results, then seed."""
     import shutil
@@ -211,15 +215,15 @@ def prepare_demo(cache_dir: Path, mnow: pd.Timestamp, run_lab: bool = True, prog
         for p in cache_dir.glob(name + "*"):
             p.unlink(missing_ok=True)
     shutil.rmtree(cache_dir / "intraday", ignore_errors=True)
-    return seed(cache_dir, mnow, run_lab=run_lab, progress=progress)
+    return seed(cache_dir, mnow, run_lab=run_lab, progress=progress, symbols=symbols, history_days=history_days)
 
 
 def last_prices(cache_dir: Path) -> dict[str, float]:
     """Where the simulator continues from: the seeded history's last closes (START otherwise)."""
     store = I.IntradayStore(Path(cache_dir) / "intraday")
     out = dict(START)
-    for sym in ("SPY", "QQQ", "XAU_USD"):
-        df = store.read(I.INSTRUMENTS[sym].source, sym)
+    for sym in SIM_SYMBOLS:
+        df = store.read(I.INSTRUMENTS[sym].source, sym, pd.Timestamp.now(tz="UTC") - pd.Timedelta(days=40))
         if len(df):
             out[sym] = float(df["Close"].iloc[-1])
     return out

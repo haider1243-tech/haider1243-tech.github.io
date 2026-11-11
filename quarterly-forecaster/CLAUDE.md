@@ -60,6 +60,7 @@ src/forecaster/
   lab_stats.py     # stats, day-clustered bootstrap, MC, p vs random, walk-forward, verdict, overfit warnings
   lab.py           # `python -m forecaster.lab download|run|show` -> data/lab/results.json + OOS trades
   shadow.py        # paper-trades every lab setup on live bars (same engine); decay vs backtest; no orders
+  simulator.py     # Simulator tab: config, filters/overrides, CAD money layer, edge stats, MC, scenarios, forward tests
   simfeed.py       # demo mode: local Finnhub/OANDA-protocol simulator + demo data seeding
   clock.py         # app-wide "now" (shifted in demo mode so the simulated market is open)
   launcher.py      # supervises monitor + webhook + dashboard (+ cloudflared) for start.bat/start.sh
@@ -67,7 +68,7 @@ src/forecaster/
   model.py         # Forecast contract + block-bootstrap baseline model
   cli.py           # `python -m forecaster`
   sources/         # one adapter per data provider
-app.py             # mobile-first Streamlit app, 8 bottom tabs (reads data/snapshots/*.json only)
+app.py             # mobile-first Streamlit app, 9 bottom tabs (reads data/snapshots/*.json only)
 static/            # PWA manifest + icons (served at /app/static/; regenerate: scripts/make_icons.py)
 start.bat, stop.bat, setup.bat, scripts/windows/   # Windows one-click launcher, shortcuts, auto-start
 start.sh           # same launcher on Linux/macOS
@@ -211,6 +212,15 @@ data/              # API response cache — contents never committed
   history + live 1m bars, with `allow_open=True`. Only signals after `started_at` count; closed
   trades are immutable (upsert only while open). It must never import or call
   `forecaster.execution` (a test greps for it); the Signal Board has no order buttons.
+- **Simulator** (`simulator.py`, Sim tab): reuses IntradayStore + strategies + `lab_engine.simulate`
+  (with `max_hold` and `cross_day` for daily bars). Engine fills include spread and slippage;
+  commission is applied in `account()` per ORDER on the real unit count (IBKR default: US$0.005/share,
+  US$1 minimum). Sizing never exceeds `max_leverage` x equity (default 1: no leverage); whole units;
+  CAD equity converted at the quote currency's USD/CAD (USD_CAD is CAD-quoted). Filters act on the
+  entry bar. The random-entry benchmark carries the same spread, slippage and average commission per
+  unit, and keeps the trades' days. Results are in-sample; say so. "Forward test" writes
+  data/sim/forward.json, which shadow trading runs with the same filters and overrides. Captions
+  with C$ amounts go through `md_money()` (two `$` render as LaTeX in st.caption/markdown).
 - **Demo mode** (`launcher --demo`, demo.bat): FORECASTER_CLOCK_OFFSET_S shifts `clock.now()` so
   market time starts at 09:44 ET on launch; FORECASTER_CACHE_DIR=data/demo (wiped and re-seeded each
   start, lab results kept); feeds point at `simfeed` on loopback with dummy keys; only simfeed, live,

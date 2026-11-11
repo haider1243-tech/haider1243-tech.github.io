@@ -55,6 +55,20 @@ Bottom tabs:
     costs, with live shadow-trading results beside it.
   - **Lab**: one setup in depth: walk-forward windows, stats, its result vs 1,000 random-entry
     strategies, equity curve, and slices by time of day, weekday, VIX band and CPI/PPI/FOMC days.
+- **Sim** (Simulator, separate from the forecaster; paper only):
+  - **Left, live market:** SPY, QQQ, NVDA, AAPL, MSFT, TSLA, gold, USD/CAD and your watchlist, each with
+    price, % today, distance from its session VWAP, a sparkline and the last tick. Tap ▶ to load one
+    into the simulator. Below: setups triggering right now with their backtest verdict (tap ▶ to load).
+  - **Right, simulator:** instrument, strategy (with editable parameters), bar size (1m to daily), period
+    (last day to 5 years, or custom), hours / weekday / CPI-PPI-FOMC filters, money in CAD (balance,
+    sizing by fixed C$, fixed units or % risked to the stop, max trades per day, max daily loss), costs
+    pre-filled per instrument, and stop / target / time-exit overrides. Press Run.
+  - **Results:** a plain-English summary, win rate, P&L, expectancy, profit factor, drawdown and hold time;
+    95% range and p-value vs 1,000 random-entry runs with an EDGE / WEAK / NO EDGE verdict (in-sample);
+    equity vs buy-and-hold with drawdown; a Monte Carlo fan of trade order; breakdowns by month, weekday
+    and hour; the trade log (CSV download); every entry and exit on the price chart.
+  - **Extras:** compare up to 4 strategies, save scenarios, and "Forward test this" to paper-trade a
+    scenario on the live feed and compare live results with the backtest.
 - **Calendar**: the next 14 days of CPI, PPI, FOMC, jobs, GDP and earnings, colour- and label-coded
   by impact, with live countdowns.
 - **Gold VWAP**: gold vs its session VWAP, the latest TradingView alerts with TAKE / CAUTION / SKIP

@@ -85,7 +85,7 @@ def _go(at, tab):
 
 
 def test_bottom_tabs_and_last_updated_on_every_tab(app):
-    assert app.radio(key="tab").options == ["Week", "Live", "Signals", "Calendar", "Gold", "Portfolio", "Reports", "Status"]
+    assert app.radio(key="tab").options == ["Week", "Live", "Signals", "Sim", "Calendar", "Gold", "Portfolio", "Reports", "Status"]
     for tab, title in (("week", "This Week"), ("calendar", "Calendar"), ("gold", "Gold VWAP"),
                        ("portfolio", "Portfolio"), ("reports", "Reports"), ("status", "Status")):
         at = _go(app, tab)
@@ -214,7 +214,7 @@ def test_status_tab(app, monkeypatch):
     at.button(key="recheck").click().run()
     assert not at.exception, at.exception
     txt = _text(at)
-    assert calls and "99 tests passed" in txt and "20/20 modules ✅" in txt
+    assert calls and "99 tests passed" in txt and "21/21 modules ✅" in txt
     assert "Add FINNHUB_API_KEY to .env" in txt or "Add FRED_API_KEY to .env" in txt
     ps.status_json(calls[0]).unlink()
 
@@ -323,3 +323,86 @@ def test_leaderboard_and_lab_views(lab_app):
 def test_signals_tab_without_results(app):
     at = _go(app, "signals")
     assert any("python -m forecaster.lab download" in i.value for i in at.info)
+
+
+@pytest.fixture
+def sim_app(tmp_path, monkeypatch):
+    """Cache with 8 months of SPY + gold 1m history and a little live data."""
+    from forecaster import live_feed as lf
+    from forecaster import simfeed as SF
+
+    mnow = NOW.floor("min")
+    SF.prepare_demo(tmp_path, mnow, run_lab=False, progress=lambda m: None, symbols=("SPY", "XAU_USD"),
+                    history_days=240)
+    store = lf.LiveStore(lf.live_db(tmp_path))
+    hub = lf.Hub(clock=lambda: int(mnow.value // 1_000_000))
+    for k in range(30):
+        t = int((mnow - pd.Timedelta(minutes=30 - k)).value // 1_000_000)
+        hub.add(lf.Tick("SPY", 600 + 0.1 * k, t, 100, "finnhub"))
+        hub.add(lf.Tick("XAU_USD", 2650 + 0.5 * k, t, 0, "oanda"))
+    for name in ("finnhub", "oanda"):
+        hub.feed(name).status, hub.feed(name).last_msg_ms = "connected", int(mnow.value // 1_000_000)
+    hub.flush(store)
+    monkeypatch.setenv("FORECASTER_CACHE_DIR", str(tmp_path))
+    at = authed_app(APP, default_timeout=120)
+    at.run()
+    return _go(at, "sim"), tmp_path
+
+
+def test_simulator_live_panel_and_pick(sim_app):
+    at, _ = sim_app
+    h = _html(at)
+    assert "Live market" in _text(at) and "Live setups right now" in _text(at)
+    assert "Gold (XAU/USD)" in h and "VWAP" in h and "<polyline" in h                 # VWAP distance + sparkline
+    assert at.selectbox(key="sim_symbol").value == "SPY"
+    at.button(key="pick_XAU_USD").click().run()
+    assert not at.exception, at.exception
+    assert at.selectbox(key="sim_symbol").value == "XAU_USD"
+    assert at.number_input(key="c_XAU_USD_spread").value == pytest.approx(0.35)       # costs pre-filled per instrument
+
+
+def test_simulator_run_compare_save_and_forward(sim_app):
+    from forecaster import simulator as SIM
+
+    at, cache = sim_app
+    at.selectbox(key="sim_strategy").set_value("ema_cross").run()
+    at.radio(key="sim_range").set_value("3 months").run()
+    at.button(key="sim_run").click().run()
+    assert not at.exception, at.exception
+    txt, h = _text(at), _html(at)
+    assert "Over the last 3 months this strategy made" in h and "In-sample" in h
+    assert "Edge vs luck" in h and "p vs 1,000 random" in h and "Total P&amp;L" in h
+    assert len(at.get("plotly_chart")) >= 3 and at.get("download_button")
+    assert len(at.dataframe) >= 4                                                    # 3 breakdowns + trade log
+    mc = next(c.value for c in at.caption if "bad luck" in c.value)
+    assert "\\$" in mc and "$-" not in mc.replace("\\$", "")                     # escaped: no LaTeX
+    assert "out-of-sample" not in h.split("Edge vs luck")[1].split("In-sample")[0]  # simulator runs are in-sample
+    assert at.number_input(key="sim_mtd_ema_cross").value == 3
+    at.selectbox(key="sim_strategy").set_value("orb15").run()
+    assert at.number_input(key="sim_mtd_orb15").value == 1                           # ORB: one trade a day
+    at.selectbox(key="sim_strategy").set_value("ema_cross").run()
+    # compare mode
+    at.toggle(key="sim_cmp").set_value(True).run()
+    at.multiselect(key="sim_cmp_list").set_value(["rsi2", "vwap_reversion"]).run()
+    at.button(key="sim_run").click().run()
+    assert not at.exception, at.exception
+    cmp = next(d.value for d in at.dataframe if "Strategy" in d.value.columns)
+    assert list(cmp["Strategy"]) == ["EMA 9/21 crossover", "RSI(2) reversion", "VWAP mean reversion"]
+    # save + forward test
+    at.button(key="sim_save").click().run()
+    assert list(SIM.load_scenarios(cache)) == ["EMA 9/21 crossover · SPY 5m"]
+    at.button(key="sim_fwd").click().run()
+    assert not at.exception
+    assert [f["key"] for f in SIM.forward_tests(cache)] == ["fwd:EMA 9/21 crossover · SPY 5m|SPY|5m"]
+    assert "Forward tests (shadow trading on the live feed)" in _text(at) and "no live trades yet" in _html(at)
+    # load the saved scenario back after changing settings
+    at.selectbox(key="sim_strategy").set_value("orb15").run()
+    at.button(key="sim_scen_load").click().run()
+    assert at.selectbox(key="sim_strategy").value == "ema_cross"
+
+
+def test_simulator_without_data(app):
+    at = _go(app, "sim")
+    at.button(key="sim_run").click().run()
+    assert not at.exception
+    assert any("No cached SPY data" in e.value for e in at.error)

@@ -62,7 +62,7 @@ FINNHUB_REST = "https://finnhub.io/api/v1"
 OANDA_STREAM = {"practice": "https://stream-fxpractice.oanda.com", "live": "https://stream-fxtrade.oanda.com"}
 OANDA_REST = {"practice": "https://api-fxpractice.oanda.com", "live": "https://api-fxtrade.oanda.com"}
 
-CORE_STOCKS = ("SPY", "QQQ", "NVDA", "AAPL", "MSFT")
+CORE_STOCKS = ("SPY", "QQQ", "NVDA", "AAPL", "MSFT", "TSLA")
 GOLD = "XAU_USD"
 DXY = "DXY"
 # ICE US Dollar Index: 50.14348112 x EURUSD^-0.576 x USDJPY^0.136 x GBPUSD^-0.119 x USDCAD^0.091
@@ -862,3 +862,33 @@ def main(argv: list[str] | None = None) -> int:  # pragma: no cover - long-runni
 
 if __name__ == "__main__":  # pragma: no cover
     raise SystemExit(main())
+
+
+def watchlist_rows(db: Path, now: pd.Timestamp, symbols: list[str], spark_minutes: int = 60) -> list[dict]:
+    """Simulator left panel: per symbol last price, % today, distance from its session VWAP (% and
+    sigma, tick- or trade-volume weighted 1m bars since the session anchor), sparkline closes, last
+    tick time and the same red/grey state rules as the Live tab's tiles."""
+    from forecaster.intraday import spec_for, trading_day
+    from forecaster.monitor import session_vwap
+
+    tiles_by = {t.symbol: t for t in tiles(db, now, [s for s in symbols if feed_of(s) == "stocks"])}
+    out = []
+    for sym in symbols:
+        t = tiles_by.get(sym)
+        spec = spec_for(sym)
+        bars = read_bars(db, sym, int((now - pd.Timedelta(hours=26)).value // 1_000_000))
+        row = {"symbol": sym, "label": LABELS.get(sym, sym), "price": t.price if t else None,
+               "change": t.change if t else None, "ts_ms": t.ts_ms if t else None,
+               "state": t.state if t else "off", "note": t.note if t else "", "vwap": None, "vwap_pct": None,
+               "vwap_z": None, "spark": []}
+        if len(bars) and spec is not None:
+            day = trading_day(bars.index, spec.vwap_anchor)
+            today = bars[day == day[-1]]
+            vol = today["Ticks"] if spec.kind == "fx" else today["Volume"].where(today["Volume"] > 0, today["Ticks"])
+            vb = session_vwap(today.assign(Volume=vol.astype(float)))
+            v, sd = float(vb["vwap"].iloc[-1]), float(vb["sd"].iloc[-1])
+            px = row["price"] or float(today["Close"].iloc[-1])
+            row.update(vwap=v, vwap_pct=px / v - 1 if v else None, vwap_z=(px - v) / sd if sd > 0 else None,
+                       spark=bars["Close"].iloc[-spark_minutes:].round(6).tolist())
+        out.append(row)
+    return out

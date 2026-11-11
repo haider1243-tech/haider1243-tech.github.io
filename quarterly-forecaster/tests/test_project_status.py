@@ -195,7 +195,7 @@ def test_refresh_writes_cache_md_and_never_leaks_keys(tmp_path):
     assert "# Project status" in text and "**Next step:**" in text and "| 👉 | **2 Validate** |" in text
     assert "FRED_API_KEY ✅" in text and "| ✅ | `market_data` | 3 tests pass |" in text
     tg = ps.telegram_text(s)
-    assert "Phase 2 (Validate)" in tg and "<b>Next:</b>" in tg and "20/20 modules" in tg
+    assert "Phase 2 (Validate)" in tg and "<b>Next:</b>" in tg and "21/21 modules" in tg
     for out in (text, tg, json.dumps(s)):
         assert SECRET not in out                                     # key values never written or sent
     # --quick keeps the previous test result

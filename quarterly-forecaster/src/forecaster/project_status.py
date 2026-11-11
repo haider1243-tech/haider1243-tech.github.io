@@ -42,7 +42,7 @@ from forecaster.config import PROJECT_ROOT
 
 MODULES = ("market_data", "macro", "calendar", "news", "forecast", "backtest", "webhook_server",
            "vwap_backtest", "execution", "monitor", "portfolio", "weekly_report", "live_feed",
-           "intraday", "strategies", "lab_engine", "lab_stats", "lab", "shadow", "simfeed")
+           "intraday", "strategies", "lab_engine", "lab_stats", "lab", "shadow", "simfeed", "simulator")
 TEST_FILES = {"webhook_server": "test_webhook", "strategies": "test_lab_engine"}          # module -> test file stem when not test_<module>
 DATA_SOURCES = (("prices", "Prices"), ("macro", "FRED macro"), ("news", "News"), ("calendar", "Calendar"))
 MAX_AGE = pd.Timedelta(hours=24)

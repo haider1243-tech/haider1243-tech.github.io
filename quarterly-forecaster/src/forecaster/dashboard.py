@@ -368,3 +368,113 @@ def lab_slices(rows: list[dict], pal: dict, height: int | None = None) -> go.Fig
     fig.update_xaxes(zeroline=True, zerolinecolor=pal["axis"], tickfont=dict(size=10), gridcolor=pal["grid"],
                      title=dict(text="expectancy per trade, bps (trades in brackets)", font=dict(size=11)))
     return fig
+
+
+# --------------------------------------------------------------------------- #
+# Simulator charts
+# --------------------------------------------------------------------------- #
+
+def sim_equity(res: dict, pal: dict, height: int = 300) -> go.Figure:
+    """Strategy equity (slot 1) with its drawdown shaded below, and buy-and-hold (slot 2)."""
+    from plotly.subplots import make_subplots
+
+    eq = res["equity"]
+    t = pd.to_datetime(eq["t"])
+    fig = make_subplots(rows=2, cols=1, shared_xaxes=True, row_heights=[0.72, 0.28], vertical_spacing=0.04)
+    if res.get("buy_hold"):
+        bh = res["buy_hold"]
+        fig.add_trace(go.Scatter(x=pd.to_datetime(bh["t"]), y=bh["equity"], name="Buy & hold",
+                                 line=dict(color=pal["s2"], width=1.5),
+                                 hovertemplate="Buy & hold C$%{y:,.0f}<extra></extra>"), row=1, col=1)
+    fig.add_trace(go.Scatter(x=t, y=eq["equity"], name="Strategy", line=dict(color=pal["s1"], width=2),
+                             hovertemplate="Strategy C$%{y:,.0f}<extra></extra>"), row=1, col=1)
+    fig.add_trace(go.Scatter(x=t, y=eq["drawdown"], name="Drawdown", fill="tozeroy", mode="lines",
+                             line=dict(color=pal["neg"], width=1), fillcolor=_rgba(pal["neg"], 0.25),
+                             hovertemplate="Drawdown C$%{y:,.0f}<extra></extra>"), row=2, col=1)
+    _layout(fig, pal, height, legend=True, y_format=",.0f")
+    fig.update_layout(margin=dict(l=4, r=6, t=26, b=4), dragmode=False, hovermode="x unified",
+                      legend=dict(orientation="h", y=1.06, x=0, font=dict(size=11)))
+    fig.update_yaxes(tickfont=dict(size=10), gridcolor=pal["grid"], zeroline=False)
+    fig.update_xaxes(tickfont=dict(size=10), showgrid=False)
+    return fig
+
+
+def sim_mc(mc: dict, pal: dict, height: int = 230) -> go.Figure:
+    """Monte Carlo of trade order: 5-95% band, median, best and worst paths."""
+    x = mc["x"]
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(x=x, y=mc["p95"], line=dict(width=0), showlegend=False, hoverinfo="skip"))
+    fig.add_trace(go.Scatter(x=x, y=mc["p5"], fill="tonexty", fillcolor=_rgba(pal["s1"], 0.18), line=dict(width=0),
+                             name="5-95% of orders", hovertemplate="5%% path C$%{y:,.0f}<extra></extra>"))
+    fig.add_trace(go.Scatter(x=x, y=mc["p50"], name="Median", line=dict(color=pal["s1"], width=2),
+                             hovertemplate="median C$%{y:,.0f}<extra></extra>"))
+    fig.add_trace(go.Scatter(x=x, y=mc["best"], name="Best", line=dict(color=pal["muted"], width=1, dash="dot"),
+                             hovertemplate="best C$%{y:,.0f}<extra></extra>"))
+    fig.add_trace(go.Scatter(x=x, y=mc["worst"], name="Worst", line=dict(color=pal["s2"], width=1, dash="dot"),
+                             hovertemplate="worst C$%{y:,.0f}<extra></extra>"))
+    _layout(fig, pal, height, legend=True, y_format=",.0f")
+    fig.update_layout(margin=dict(l=4, r=6, t=26, b=4), dragmode=False,
+                      legend=dict(orientation="h", y=1.08, x=0, font=dict(size=11)))
+    fig.update_xaxes(title=dict(text="trade number", font=dict(size=11)), tickfont=dict(size=10))
+    fig.update_yaxes(tickfont=dict(size=10))
+    return fig
+
+
+def sim_trades_chart(bars: pd.DataFrame, log: pd.DataFrame, pal: dict, max_trades: int = 150,
+                     height: int = 300) -> go.Figure:
+    """Close price with the latest `max_trades` entries (triangles) and exits (x) marked."""
+    tl = log.tail(max_trades)
+    if len(tl):
+        lo, hi = pd.Timestamp(tl["entry_time"].min()), pd.Timestamp(tl["exit_time"].max())
+        b = bars[(bars.index >= lo - (hi - lo) * 0.03) & (bars.index <= hi + (hi - lo) * 0.03)]
+    else:
+        b = bars.tail(500)
+    step = max(1, len(b) // 1500)
+    bb = b.iloc[::step]
+    x = bb.index.tz_convert("America/New_York")
+    fig = go.Figure(go.Scatter(x=x, y=bb["Close"], mode="lines", line=dict(color=pal["ink2"], width=1),
+                               name="Close", hovertemplate="%{y:,.2f}<extra></extra>"))
+    for side, sym, col, name in ((1, "triangle-up", pal["s1"], "Long entry"), (-1, "triangle-down", pal["s2"], "Short entry")):
+        s = tl[tl["side"] == side]
+        if len(s):
+            fig.add_trace(go.Scatter(x=pd.DatetimeIndex(s["entry_time"]).tz_convert("America/New_York"), y=s["entry"],
+                                     mode="markers", marker=dict(symbol=sym, size=9, color=col), name=name,
+                                     hovertemplate=name + " %{y:,.2f}<extra></extra>"))
+    if len(tl):
+        win = tl["pnl_cad"] > 0
+        fig.add_trace(go.Scatter(x=pd.DatetimeIndex(tl["exit_time"]).tz_convert("America/New_York"), y=tl["exit"],
+                                 mode="markers", name="Exit",
+                                 marker=dict(symbol="x", size=7, color=[pal["ink"] if w else pal["neg"] for w in win]),
+                                 customdata=np.c_[tl["pnl_cad"], tl["reason"]],
+                                 hovertemplate="Exit %{y:,.2f} · C$%{customdata[0]:,.0f} · %{customdata[1]}<extra></extra>"))
+    _layout(fig, pal, height, legend=True, y_format=",.2f")
+    fig.update_layout(margin=dict(l=4, r=6, t=26, b=4), dragmode="pan",
+                      legend=dict(orientation="h", y=1.08, x=0, font=dict(size=11)))
+    fig.update_xaxes(tickfont=dict(size=10))
+    fig.update_yaxes(tickfont=dict(size=10))
+    return fig
+
+
+def sim_compare_equity(results: list[dict], names: list[str], pal: dict, height: int = 260) -> go.Figure:
+    colors = [pal["s1"], pal["s2"], "#8f6bd8", "#2aa198"]
+    fig = go.Figure()
+    for res, name, col in zip(results, names, colors):
+        eq = res["equity"]
+        fig.add_trace(go.Scatter(x=pd.to_datetime(eq["t"]), y=eq["equity"], name=name, line=dict(color=col, width=2),
+                                 hovertemplate=name + " C$%{y:,.0f}<extra></extra>"))
+    _layout(fig, pal, height, legend=True, y_format=",.0f")
+    fig.update_layout(margin=dict(l=4, r=6, t=30, b=4), dragmode=False,
+                      legend=dict(orientation="h", y=1.1, x=0, font=dict(size=11)))
+    return fig
+
+
+def sparkline_svg(values: list[float], up: str, down: str, w: int = 84, h: int = 24) -> str:
+    v = [x for x in values if x is not None]
+    if len(v) < 2:
+        return f'<svg width="{w}" height="{h}" aria-hidden="true"></svg>'
+    lo, hi = min(v), max(v)
+    rng = (hi - lo) or 1.0
+    pts = " ".join(f"{i * (w - 2) / (len(v) - 1) + 1:.1f},{h - 2 - (x - lo) / rng * (h - 4):.1f}" for i, x in enumerate(v))
+    col = up if v[-1] >= v[0] else down
+    return (f'<svg width="{w}" height="{h}" viewBox="0 0 {w} {h}" aria-hidden="true">'
+            f'<polyline fill="none" stroke="{col}" stroke-width="1.5" points="{pts}"/></svg>')

@@ -67,7 +67,20 @@ INSTRUMENTS: dict[str, InstrumentSpec] = {
     # gold: day-trade the London/New York overlap through the COMEX session, flat before the
     # 17:00 daily break; VWAP resets 18:00 like the live tab, the Pine strategy and the monitor
     "XAU_USD": InstrumentSpec("XAU_USD", "fx", "oanda", "08:00", "16:55", "18:00", 0.01),
+    "USD_CAD": InstrumentSpec("USD_CAD", "fx", "oanda", "08:00", "16:55", "18:00", 0.00001),
+    **{s: InstrumentSpec(s, "stock", "alpaca", "09:30", "16:00", "09:30", 0.01) for s in ("NVDA", "AAPL", "MSFT", "TSLA")},
 }
+
+
+def spec_for(symbol: str) -> InstrumentSpec | None:
+    """Known instrument, or a US stock spec for a plain ticker (Alpaca has US stocks only;
+    TSX symbols like XIU.TO and indices have no intraday source, so None)."""
+    symbol = symbol.upper()
+    if symbol in INSTRUMENTS:
+        return INSTRUMENTS[symbol]
+    if symbol.isalpha() and len(symbol) <= 5:
+        return InstrumentSpec(symbol, "stock", "alpaca", "09:30", "16:00", "09:30", 0.01)
+    return None
 
 
 def _hm(s: str) -> int:
@@ -211,7 +224,7 @@ class IntradayStore:
 def load_bars(store: IntradayStore, symbol: str, timeframe: str, start: pd.Timestamp | None = None,
               end: pd.Timestamp | None = None) -> pd.DataFrame:
     """Cached 1m bars -> the instrument's trading window -> timeframe."""
-    spec = INSTRUMENTS[symbol]
+    spec = spec_for(symbol)
     df = session_bars(store.read(spec.source, symbol, start, end), spec)
     if timeframe == "1d":
         return daily_bars(df, spec)
@@ -344,15 +357,16 @@ def synthetic_m1(symbol: str, start: str, end: str, seed: int = 0, price: float 
     """Random-walk 1-minute bars over the instrument's trading window with a U-shaped intraday
     volatility/volume profile, overnight gaps and (for fx) a spread column. `edge` can plant a
     pattern for tests."""
-    spec = INSTRUMENTS[symbol]
+    spec = spec_for(symbol)
     rng = np.random.default_rng(seed)
     days = pd.bdate_range(start, end)
     if spec.kind == "fx":
         s0, n_min = _hm(spec.vwap_anchor) - 24 * 60, 23 * 60          # 18:00 the evening before -> 17:00
     else:
         s0, n_min = _hm(spec.session_start), _hm(spec.session_end) - _hm(spec.session_start)
-    price = price or {"SPY": 450.0, "QQQ": 380.0, "XAU_USD": 1900.0}[symbol]
-    daily_vol = {"SPY": 0.011, "QQQ": 0.014, "XAU_USD": 0.009}[symbol]
+    price = price or {"SPY": 450.0, "QQQ": 380.0, "XAU_USD": 1900.0, "USD_CAD": 1.36}.get(symbol, 200.0)
+    daily_vol = {"SPY": 0.011, "QQQ": 0.014, "XAU_USD": 0.009, "USD_CAD": 0.004, "NVDA": 0.028,
+                 "TSLA": 0.035, "AAPL": 0.016, "MSFT": 0.015}.get(symbol, 0.02)
     u = np.linspace(-1, 1, n_min)
     shape = 0.6 + 1.2 * u ** 2                                # U-shaped intraday activity
     shape /= np.sqrt((shape ** 2).mean())
@@ -372,7 +386,8 @@ def synthetic_m1(symbol: str, start: str, end: str, seed: int = 0, price: float 
         idx = (pd.Timestamp(d).tz_localize(NY) + pd.to_timedelta(s0 + np.arange(n_min), unit="m")).tz_convert("UTC")
         f = pd.DataFrame({"Open": open_, "High": high, "Low": low, "Close": close, "Volume": vol}, index=idx)
         if spec.kind == "fx":
-            f["Spread"] = np.round(np.abs(rng.normal(0.30, 0.06, n_min)) + 0.12, 3)
+            base = 0.30 if symbol == "XAU_USD" else close.mean() * 0.00012
+            f["Spread"] = np.abs(rng.normal(base, base * 0.2, n_min)) + base * 0.4
         frames.append(f)
         p = close[-1]
     df = pd.concat(frames)

@@ -100,7 +100,7 @@ def live_1m(live_db: Path, symbol: str, since: pd.Timestamp) -> pd.DataFrame:
 
 def combined_1m(store: I.IntradayStore | None, live_db: Path, symbol: str, now: pd.Timestamp,
                 days: int = HISTORY_DAYS) -> pd.DataFrame:
-    spec = I.INSTRUMENTS[symbol]
+    spec = I.spec_for(symbol)
     since = now - pd.Timedelta(days=days)
     hist = store.read(spec.source, symbol, since) if store is not None else pd.DataFrame()
     live = live_1m(live_db, symbol, since)
@@ -121,7 +121,7 @@ def combined_1m(store: I.IntradayStore | None, live_db: Path, symbol: str, now: 
 def evaluate(bars_1m: pd.DataFrame, symbol: str, tf: str, setups: list[dict], since: pd.Timestamp,
              now: pd.Timestamp) -> tuple[list[dict], list[dict]]:
     """-> (trades with signal >= since, pending setups on the latest completed bar)."""
-    spec = I.INSTRUMENTS[symbol]
+    spec = I.spec_for(symbol)
     minutes = I.TIMEFRAMES[tf]
     bars = I.resample(bars_1m, minutes, spec)
     bars = bars[bars.index + pd.Timedelta(minutes=minutes) <= now]          # completed bars only
@@ -134,7 +134,14 @@ def evaluate(bars_1m: pd.DataFrame, symbol: str, tf: str, setups: list[dict], si
         costs = E.CostModel(**s["costs"]) if s.get("costs") else E.DEFAULT_COSTS[symbol]
         pp = E.prepare(bars, spec, minutes, costs)
         sig = st.signals(f)
-        tr = E.simulate(pp, sig, costs, int(st.params.get("max_trades", 99)), allow_open=True)
+        max_hold, max_trades = None, int(st.params.get("max_trades", 99))
+        if s.get("sim"):                    # a Simulator forward test: same filters and overrides as its backtest
+            from forecaster.simulator import SimConfig, adjust_signals
+
+            cfg = SimConfig.from_dict({**s["sim"], "start": "", "end": ""})
+            sig = adjust_signals(sig, bars, cfg, None, minutes)
+            max_hold, max_trades = cfg.max_hold_bars, int(cfg.max_trades_per_day)
+        tr = E.simulate(pp, sig, costs, max_trades, allow_open=True, max_hold=max_hold)
         tr = tr[pd.DatetimeIndex(tr["signal_time"]) >= since] if len(tr) else tr
         base = {"key": s["key"], "strategy": s["strategy"], "instrument": symbol, "timeframe": tf,
                 "verdict": s["verdict"], "params": json.dumps(s["params"], sort_keys=True)}
@@ -185,14 +192,19 @@ def run_once(cache_dir: Path, now: pd.Timestamp | None = None, doc: dict | None 
     doc = doc if doc is not None else L.load_results(cache_dir)
     db = shadow_db(cache_dir)
     since = started_at(db, now)
-    if not doc or not doc.get("setups"):
+    from forecaster.simulator import forward_tests as _fwd
+
+    if (not doc or not doc.get("setups")) and not _fwd(cache_dir):
         write(db, [], [], [], now)
         return {"trades": 0, "pending": 0, "setups": 0}
+    doc = doc or {"setups": []}
     from forecaster.live_feed import live_db
 
     store = store if store is not None else I.IntradayStore(Path(cache_dir) / "intraday")
     groups: dict[tuple[str, str], list[dict]] = {}
-    for s in doc["setups"]:
+    from forecaster.simulator import forward_tests
+
+    for s in [*doc["setups"], *forward_tests(cache_dir)]:
         groups.setdefault((s["instrument"], s["timeframe"]), []).append(s)
     all_tr, all_pend = [], []
     for sym in {k[0] for k in groups}:
@@ -203,8 +215,9 @@ def run_once(cache_dir: Path, now: pd.Timestamp | None = None, doc: dict | None 
             tr, pend = evaluate(m1, sym, tf, setups, since, now)
             all_tr += tr
             all_pend += pend
-    write(db, all_tr, all_pend, [s["key"] for s in doc["setups"]], now)
-    return {"trades": len(all_tr), "pending": len(all_pend), "setups": len(doc["setups"])}
+    keys = [s["key"] for v in groups.values() for s in v]
+    write(db, all_tr, all_pend, keys, now)
+    return {"trades": len(all_tr), "pending": len(all_pend), "setups": len(keys)}
 
 
 # --------------------------------------------------------------------------- #

@@ -63,7 +63,7 @@ def test_sessions():
 
 
 def test_finnhub_symbols_from_watchlist():
-    assert L.finnhub_symbols(["XIU.TO", "^VIX", "GC=F", "spy", "AMD"]) == ["SPY", "QQQ", "NVDA", "AAPL", "MSFT",
+    assert L.finnhub_symbols(["XIU.TO", "^VIX", "GC=F", "spy", "AMD"]) == ["SPY", "QQQ", "NVDA", "AAPL", "MSFT", "TSLA",
                                                                          "XIU.TO", "AMD"]
 
 
