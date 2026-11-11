@@ -249,7 +249,8 @@ def header(title: str) -> None:
         st.html('<div class="qf-banner" style="background:#8a5a00"><b>⚡ Demo mode: simulated market</b>'
                 f'Prices are generated on this PC, not real quotes. Simulated time {now.tz_convert(ad.NY):%H:%M} ET. '
                 "Strategies, shadow trades and signals run exactly as they would live. Stop with stop.bat.</div>")
-    probs = health.problems(settings.cache_dir, now, health.expected_sources(settings))
+    # demo mode skips the daily/weekly data jobs on purpose, so their "no data" isn't a problem there
+    probs = [] if is_demo() else health.problems(settings.cache_dir, now, health.expected_sources(settings))
     if probs:
         items = "".join(f"<li>{esc(p.message)}</li>" for p in probs)
         st.html(f'<div class="qf-banner" role="alert"><b>⚠ Data problem</b><ul style="margin:0;padding-left:18px">'
@@ -746,7 +747,9 @@ def signal_board(doc: dict) -> None:
         for p in sorted(pending, key=lambda p: rank.get(by_key[p["key"]]["verdict"], 3)):
             s = by_key[p["key"]]
             rr = abs(p["target"] - p["ref"]) / max(abs(p["ref"] - p["stop"]), 1e-9)
-            when = "setup " + ad.ago(pd.Timestamp(p["signal_time"]), now) + ", entry at the next bar's open"
+            closed_at = pd.Timestamp(p["signal_time"]) + pd.Timedelta(minutes=int(p["timeframe"].rstrip("mh")) *
+                                                                       (60 if p["timeframe"].endswith("h") else 1))
+            when = "setup " + ad.ago(closed_at, now) + ", entry at the next bar's open"
             cards.append(_setup_card(s, p["side"], [f"entry ≈ {p['ref']:,.2f}", f"stop {p['stop']:,.2f}",
                                                     f"target {p['target']:,.2f}", f"R:R {rr:.1f}"], when))
         for _, t in (open_t.iterrows() if len(open_t) else []):
