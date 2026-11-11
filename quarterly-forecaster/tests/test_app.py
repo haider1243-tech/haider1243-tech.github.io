@@ -214,7 +214,7 @@ def test_status_tab(app, monkeypatch):
     at.button(key="recheck").click().run()
     assert not at.exception, at.exception
     txt = _text(at)
-    assert calls and "99 tests passed" in txt and "19/19 modules ✅" in txt
+    assert calls and "99 tests passed" in txt and "20/20 modules ✅" in txt
     assert "Add FINNHUB_API_KEY to .env" in txt or "Add FRED_API_KEY to .env" in txt
     ps.status_json(calls[0]).unlink()
 

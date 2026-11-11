@@ -85,7 +85,15 @@ STABLE_AFTER = 60.0
 
 
 def now_ms() -> int:
-    return time.time_ns() // 1_000_000
+    from forecaster.clock import now_ms as _now_ms
+
+    return _now_ms()
+
+
+def _now() -> pd.Timestamp:
+    from forecaster.clock import now
+
+    return now()
 
 
 def redact(text: str, secrets: Iterable[str | None]) -> str:
@@ -452,7 +460,7 @@ async def finnhub_session(hub: Hub, key: str, symbols: list[str], url: str = FIN
     from websockets.exceptions import InvalidStatus
 
     connect = connect or ws_connect
-    clock = clock or (lambda: pd.Timestamp.now(tz="UTC"))
+    clock = clock or _now
     try:
         ws_cm = connect(f"{url}?token={key}", ping_interval=20, ping_timeout=20, open_timeout=15,
                         max_size=2**22)
@@ -493,7 +501,7 @@ async def oanda_session(hub: Hub, token: str, account: str, instruments: Iterabl
                         client=None, clock: Callable[[], pd.Timestamp] | None = None) -> None:
     import httpx
 
-    clock = clock or (lambda: pd.Timestamp.now(tz="UTC"))
+    clock = clock or _now
     own = client is None
     client = client or httpx.AsyncClient(timeout=httpx.Timeout(15.0, read=None))
     try:
@@ -832,7 +840,10 @@ def main(argv: list[str] | None = None) -> int:  # pragma: no cover - long-runni
         if args.check:
             loop.call_later(args.check, stop.set)
         # test hooks: point the feeds at local simulators (defaults are the real hosts)
-        return await run_service(cfg, db, stop, prev_close_loader=_prev_close_loader(cfg, settings.cache_dir),
+        from forecaster.clock import is_demo
+
+        loader = None if is_demo() else _prev_close_loader(cfg, settings.cache_dir)
+        return await run_service(cfg, db, stop, prev_close_loader=loader,
                                  finnhub_url=os.environ.get("FORECASTER_LIVE_FINNHUB_URL") or FINNHUB_WS,
                                  oanda_host=os.environ.get("FORECASTER_LIVE_OANDA_URL") or None)
 

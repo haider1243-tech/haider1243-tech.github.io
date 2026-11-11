@@ -9,6 +9,15 @@ See [CLAUDE.md](CLAUDE.md) for goals, design rules and every command.
 > See [results/backtest_sp500_2005_2022.md](results/backtest_sp500_2005_2022.md).
 > The dashboard shows this on every page.
 
+## Try it now: demo mode (no keys, any time of day)
+
+Double-click **`demo.bat`** (Linux/macOS: `./demo.sh`). The app opens with a **simulated live market**:
+the clock starts at 09:44 New York time whenever you launch it, so stocks and gold are "open". Prices
+tick every second, the gold chart builds its VWAP bands, all 11 strategies watch the bars, and
+setups appear on the Signals tab as paper trades with their backtest stats. Everything runs on your
+PC from a built-in simulator. No API keys, no real orders, no Telegram messages; a banner on every
+page says it's a demo. Data goes to `data/demo` (deleted and rebuilt each start). Stop it with `stop.bat`.
+
 ## Use it as a phone app (no code)
 
 **Windows, one time:** install [Python 3.11+](https://www.python.org/downloads/) (tick *Add python.exe

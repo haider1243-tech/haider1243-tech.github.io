@@ -228,7 +228,9 @@ def all_ticker_snaps() -> dict[str, dict]:
 
 
 def now_utc() -> pd.Timestamp:
-    return pd.Timestamp.now(tz="UTC")
+    from forecaster.clock import now
+
+    return now()                       # shifted in demo mode, so the simulated market is open
 
 
 def esc(x) -> str:
@@ -240,7 +242,13 @@ def esc(x) -> str:
 # --------------------------------------------------------------------------- #
 
 def header(title: str) -> None:
+    from forecaster.clock import is_demo
+
     now = now_utc()
+    if is_demo():
+        st.html('<div class="qf-banner" style="background:#8a5a00"><b>⚡ Demo mode: simulated market</b>'
+                f'Prices are generated on this PC, not real quotes. Simulated time {now.tz_convert(ad.NY):%H:%M} ET. '
+                "Strategies, shadow trades and signals run exactly as they would live. Stop with stop.bat.</div>")
     probs = health.problems(settings.cache_dir, now, health.expected_sources(settings))
     if probs:
         items = "".join(f"<li>{esc(p.message)}</li>" for p in probs)

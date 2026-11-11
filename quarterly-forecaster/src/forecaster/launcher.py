@@ -124,6 +124,33 @@ def build_services(root: Path = PROJECT_ROOT, python: str = sys.executable,
     return svcs
 
 
+def demo_env(root: Path = PROJECT_ROOT, real_now=None) -> dict[str, str]:
+    """Environment for demo mode: a shifted clock (market opens at 09:44 ET now), local simulated
+    feeds, dummy keys that only ever reach those local servers, and a separate data folder."""
+    import pandas as pd
+
+    from forecaster.simfeed import FINNHUB_PORT, OANDA_PORT, demo_market_start
+
+    real_now = real_now or pd.Timestamp.now(tz="UTC")
+    offset = (demo_market_start(real_now) - real_now).total_seconds()
+    return {"FORECASTER_DEMO": "1", "FORECASTER_CLOCK_OFFSET_S": f"{offset:.3f}",
+            "FORECASTER_CACHE_DIR": str(root / "data" / "demo"),
+            "FORECASTER_LIVE_FINNHUB_URL": f"ws://127.0.0.1:{FINNHUB_PORT}",
+            "FORECASTER_LIVE_OANDA_URL": f"http://127.0.0.1:{OANDA_PORT}",
+            "FINNHUB_API_KEY": "demo", "OANDA_API_TOKEN": "demo", "OANDA_ACCOUNT_ID": "demo"}
+
+
+def build_demo_services(root: Path = PROJECT_ROOT, python: str = sys.executable) -> list[Service]:
+    """Demo: simulator + live feed + shadow trading + dashboard. No monitor, webhook or tunnel,
+    so nothing reaches Telegram, TradingView or a broker."""
+    return [Service("simfeed", [python, "-m", "forecaster.simfeed"]),
+            Service("live", [python, "-m", "forecaster.live_feed"]),
+            Service("shadow", [python, "-m", "forecaster.shadow"]),
+            Service("dashboard", [python, "-m", "streamlit", "run", str(root / "app.py"),
+                                  "--server.address", "127.0.0.1", "--server.port", str(DASHBOARD_PORT),
+                                  "--server.headless", "true", "--browser.gatherUsageStats", "false"])]
+
+
 def check_config(root: Path = PROJECT_ROOT) -> tuple[list[str], list[str]]:
     """(errors, warnings). Errors stop the launcher."""
     errors, warns = [], []
@@ -316,6 +343,7 @@ def main(argv: list[str] | None = None) -> int:  # pragma: no cover - long-runni
     ap.add_argument("--stop", action="store_true", help="stop the running launcher")
     ap.add_argument("--status", action="store_true", help="show whether it's running")
     ap.add_argument("--check", action="store_true", help="check the configuration and exit")
+    ap.add_argument("--demo", action="store_true", help="simulated live market (no keys or market hours needed)")
     args = ap.parse_args(argv)
     root = PROJECT_ROOT
     pid_file = root / "data" / "launcher.pid"
@@ -326,6 +354,8 @@ def main(argv: list[str] | None = None) -> int:  # pragma: no cover - long-runni
         print("Stopped." if stop_running(pid_file) else "Not running.")
         return 0
     errors, warns = check_config(root)
+    if args.demo:                                 # only the dashboard password matters in demo mode
+        errors, warns = [e for e in errors if "password" in e.lower() or ".env is missing" in e], []
     if args.status or args.check:
         pid = running_pid(pid_file)
         print(f"Launcher: {'running (pid %d)' % pid if pid else 'not running'} · dashboard {url}")
@@ -351,8 +381,19 @@ def main(argv: list[str] | None = None) -> int:  # pragma: no cover - long-runni
 
     setup_logging(log_dir, "launcher")
     log = logging.getLogger("launcher")
-    tunnel = tunnel_config(root, root / "data")
-    sup = Supervisor(build_services(root, tunnel=tunnel), log_dir, root, echo=log.info)
+    if args.demo:
+        os.environ.update(demo_env(root))
+        from forecaster.clock import now as market_now
+        from forecaster.simfeed import prepare_demo
+
+        log.info("Demo mode: preparing simulated market data in data/demo ...")
+        prepare_demo(root / "data" / "demo", market_now(), progress=log.info)
+        tunnel = None
+        services = build_demo_services(root)
+    else:
+        tunnel = tunnel_config(root, root / "data")
+        services = build_services(root, tunnel=tunnel)
+    sup = Supervisor(services, log_dir, root, echo=log.info)
     stop = {"flag": False}
 
     def _sig(*_):
@@ -363,7 +404,9 @@ def main(argv: list[str] | None = None) -> int:  # pragma: no cover - long-runni
     if WINDOWS and hasattr(signal, "SIGBREAK"):
         signal.signal(signal.SIGBREAK, _sig)
     log.info("Quarterly Forecaster running. Dashboard: %s (logs in %s)", url, log_dir)
-    if tunnel is None:
+    if args.demo:
+        log.info("DEMO: simulated market, opens at 09:44 ET now. Stop with stop.bat.")
+    elif tunnel is None:
         log.info("Cloudflare tunnel: not configured (TradingView alerts can't reach this PC).")
     if args.open:
         import threading
@@ -374,7 +417,8 @@ def main(argv: list[str] | None = None) -> int:  # pragma: no cover - long-runni
         from forecaster import project_status
         from forecaster.config import load_settings
 
-        project_status.start_background(load_settings().cache_dir, root)   # refreshes STATUS.md
+        if not args.demo:
+            project_status.start_background(load_settings().cache_dir, root)   # refreshes STATUS.md
     except Exception as exc:
         log.warning("status check not started: %s", exc)
     try:

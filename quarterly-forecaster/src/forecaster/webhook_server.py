@@ -429,7 +429,9 @@ def evaluate_alert(alert: Alert, t: pd.Timestamp, ctx: Context, cfg: RuleConfig)
     ]
     if alert.symbol in LIVE_GOLD:
         # the live price is judged at receipt time: that is when a trade would actually be placed
-        checks.append(check_live_gold(alert, ctx.live_gold(pd.Timestamp.now(tz="UTC")), cfg))
+        from forecaster.clock import now as _now
+
+        checks.append(check_live_gold(alert, ctx.live_gold(_now()), cfg))
     verdict, reasons = decide(checks, cfg)
     return verdict, reasons, checks
 

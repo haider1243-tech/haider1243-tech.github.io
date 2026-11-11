@@ -60,6 +60,8 @@ src/forecaster/
   lab_stats.py     # stats, day-clustered bootstrap, MC, p vs random, walk-forward, verdict, overfit warnings
   lab.py           # `python -m forecaster.lab download|run|show` -> data/lab/results.json + OOS trades
   shadow.py        # paper-trades every lab setup on live bars (same engine); decay vs backtest; no orders
+  simfeed.py       # demo mode: local Finnhub/OANDA-protocol simulator + demo data seeding
+  clock.py         # app-wide "now" (shifted in demo mode so the simulated market is open)
   launcher.py      # supervises monitor + webhook + dashboard (+ cloudflared) for start.bat/start.sh
   auth.py          # dashboard password (PBKDF2, ':'-separated hash) + login lockouts
   model.py         # Forecast contract + block-bootstrap baseline model
@@ -209,6 +211,12 @@ data/              # API response cache — contents never committed
   history + live 1m bars, with `allow_open=True`. Only signals after `started_at` count; closed
   trades are immutable (upsert only while open). It must never import or call
   `forecaster.execution` (a test greps for it); the Signal Board has no order buttons.
+- **Demo mode** (`launcher --demo`, demo.bat): FORECASTER_CLOCK_OFFSET_S shifts `clock.now()` so
+  market time starts at 09:44 ET on launch; FORECASTER_CACHE_DIR=data/demo (wiped and re-seeded each
+  start, lab results kept); feeds point at `simfeed` on loopback with dummy keys; only simfeed, live,
+  shadow and dashboard run (no monitor, webhook or tunnel). Anything that compares "now" with market
+  sessions must use `forecaster.clock`, not `pd.Timestamp.now()`, or it breaks in demo mode. The app
+  shows a demo banner whenever `clock.is_demo()`.
 - **Launcher** (`launcher.py`): binds everything to 127.0.0.1, restarts crashed services
   with backoff, one instance (data/launcher.pid). The webhook gets `--trust-proxy` only
   when cloudflared runs. Windows scripts must keep CRLF line endings (`.gitattributes`).
@@ -324,6 +332,7 @@ python -m forecaster.live_feed --check 30         # connect 30 s, print ticks pe
 python -m forecaster.lab download --years 3        # 1m history (OANDA gold, Alpaca stocks)
 python -m forecaster.lab run [--synthetic]         # walk-forward lab -> data/lab/results.json
 python -m forecaster.shadow --once                 # one shadow-trading pass (the launcher runs it continuously)
+python -m forecaster.launcher --demo [--open]      # simulated live market (demo.bat / demo.sh)
 python -m forecaster.project_status [--quick] [--send]   # STATUS.md: build, data, model, phase, next step
 ```
 

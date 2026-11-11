@@ -179,7 +179,9 @@ def write(db: Path, trades: list[dict], pending: list[dict], keys: list[str], no
 
 def run_once(cache_dir: Path, now: pd.Timestamp | None = None, doc: dict | None = None,
              store: I.IntradayStore | None = None) -> dict:
-    now = now or pd.Timestamp.now(tz="UTC")
+    from forecaster.clock import now as _now
+
+    now = now or _now()
     doc = doc if doc is not None else L.load_results(cache_dir)
     db = shadow_db(cache_dir)
     since = started_at(db, now)

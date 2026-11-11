@@ -127,6 +127,8 @@ def test_windows_scripts():
     for txt in (start, setup, ps1):
         assert "\r\n" in txt and "\n" not in txt.replace("\r\n", "")     # CRLF only (cmd.exe needs it)
     assert "-m forecaster.launcher --open" in start and "/boot" in start and "setup.bat" in start
+    demo = (root / "demo.bat").read_bytes().decode()
+    assert "\r\n" in demo and "-m forecaster.launcher --demo --open" in demo
     assert "forecaster.auth --write-env" in setup and "create_shortcuts.ps1" in setup
     assert "tailscale serve --bg 8501" in setup and "funnel" not in setup.lower()   # tailnet only, never public
     assert "AtStartup" in ps1 and "ExecutionTimeLimit ([TimeSpan]::Zero)" in ps1 and "GetFolderPath(\"Startup\")" in ps1
